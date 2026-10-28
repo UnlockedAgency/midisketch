@@ -238,11 +238,12 @@ function ensureAudio(){
     setFxLevels();
     setBrightness(+el('bright').value);
     setPulseVol(+el('pulseVol').value);
+    actx.onstatechange = updateAudioBadge;
     noiseBuf = actx.createBuffer(1, actx.sampleRate*0.5, actx.sampleRate);
     const d = noiseBuf.getChannelData(0);
     for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
   }
-  if(actx.state==='suspended') actx.resume();
+  if(actx.state!=='running') actx.resume(); // iOS reports 'interrupted' as well as 'suspended'
   updateAudioBadge();
 }
 function setBrightness(v){ if(brightLP) brightLP.frequency.value = 1500*Math.pow(16000/1500, v/100); }
@@ -665,6 +666,7 @@ function renderNotes(){
     if(n.roll){
       const seg = ppu*2/n.roll; // roll subdivides 16ths (2 units)
       d.style.backgroundImage = `repeating-linear-gradient(90deg, transparent 0 ${seg-2}px, rgba(8,12,16,.6) ${seg-2}px ${seg}px)`;
+      d.textContent = '×'+n.roll;
     }
     host.appendChild(d);
   }
@@ -732,10 +734,11 @@ function initGridInput(){
     const d = ui.drag;
     if(d.mode==='maybe'){
       const dx = ev.clientX-d.x0, dy = ev.clientY-d.y0;
-      if(Math.abs(dx)>9 && Math.abs(dx)>=Math.abs(dy)){ clearTimeout(d.lp); d.mode='stretch'; }
-      else if(Math.abs(dy)>14 && Math.abs(dy)>Math.abs(dx) && !d.isNew){
-        clearTimeout(d.lp); d.mode='roll';
-        d.rollIdx0 = [0,2,3,4].indexOf(d.note.roll||0); d.y0r = ev.clientY;
+      if(Math.hypot(dx,dy)>6) clearTimeout(d.lp); // any movement cancels hold-for-accent
+      if(Math.abs(dx)>9 && Math.abs(dx)>=Math.abs(dy)){ d.mode='stretch'; }
+      else if(Math.abs(dy)>14 && Math.abs(dy)>Math.abs(dx)){
+        d.mode='roll';
+        d.rollIdx0 = [0,2,3,4].indexOf(d.note.roll||0); d.y0r = d.y0;
       }
     }
     if(d.mode==='stretch'){

@@ -101,7 +101,9 @@ input[type=range]{touch-action:none}
 .gridRow.off{background-color:#0b0e13; opacity:.55}
 #notes{position:absolute; inset:0; pointer-events:none}
 .note{position:absolute; height:calc(var(--rowh) - 6px); margin-top:3px; border-radius:6px;
-  background:linear-gradient(180deg,#45e2cf,#23a596); border:1px solid #9df3e8; opacity:.95}
+  background:linear-gradient(180deg,#45e2cf,#23a596); border:1px solid #9df3e8; opacity:.95;
+  display:flex; align-items:center; justify-content:center;
+  font-size:10px; font-weight:800; color:#06281f; overflow:hidden}
 .note.accent{background:linear-gradient(180deg,#f2c178,#cf8f3a); border-color:#ffe3b3}
 .note.stray{background:linear-gradient(180deg,#e07a7a,#a84848); border-color:#ffb9b9}
 .note.contL{border-top-left-radius:0; border-bottom-left-radius:0; border-left-style:dashed}
@@ -173,7 +175,7 @@ input[type=range]{touch-action:none}
 </div>
 
 <div id="soundPanel">
-  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v7</div>
+  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v8</div>
   <div class="sp"><label>Swing</label><input type="range" id="swing" min="0" max="60" value="0"><span id="swingVal" style="width:38px">0%</span></div>
   <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
   <div class="sp"><label>Delay</label><input type="range" id="delayVol" min="0" max="100" value="60"></div>
@@ -197,7 +199,7 @@ input[type=range]{touch-action:none}
 </div>
 
 <div class="row" id="barRow"></div>
-<div id="hint">◀ ▶ or bar chips move between bars · tap current bar's chip = chord &amp; bar tools · tap note = delete · drag sideways = stretch · drag <b>up/down</b> = roll ×2 ×3 ×4 · hold = accent · Grid 1/32 = half-bar zoom</div>
+<div id="hint">◀ ▶ = move between bars · tap note = delete · drag → = stretch · touch &amp; <b>immediately</b> drag ↑ = roll (note shows ×2 ×3 ×4) · hold <b>still</b> = accent (orange) · tap current bar chip = chord/bar tools</div>
 <div class="row" id="toolRow">
   <div id="barNav">
     <button id="barPrev">◀</button><span id="barPos">1/4</span><button id="barNext">▶</button>
