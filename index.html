@@ -159,6 +159,8 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
 <div id="soundPanel">
   <div class="sp"><label>Swing</label><input type="range" id="swing" min="0" max="60" value="0"><span id="swingVal" style="width:38px">0%</span></div>
   <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
+  <div class="sp"><label>Delay</label><input type="range" id="delayVol" min="0" max="100" value="60"></div>
+  <div class="sp"><label>Reverb</label><input type="range" id="verbVol" min="0" max="100" value="55"></div>
   <div class="sp"><label>Pulse</label>
     <div class="chips">
       <button data-pulse="off" class="on">Off</button>
@@ -172,7 +174,7 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
     <div class="pm"><button id="octDn">−</button><span class="val" id="octVal">C2–B4</span><button id="octUp">+</button></div>
     <span style="color:var(--dim);font-size:11px">shift range</span>
   </div>
-  <div style="color:var(--dim);font-size:11px">midisketch v2</div>
+  <div style="color:var(--dim);font-size:11px">midisketch v3</div>
 </div>
 
 <div class="row" id="barRow"></div>

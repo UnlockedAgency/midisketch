@@ -122,6 +122,50 @@ function snapStrays(){
 
 /* ================= audio engine ================= */
 let actx=null, master=null, brightLP=null, comp=null, cutGain=null, pulseGain=null, noiseBuf=null;
+let delayBus=null, dlL=null, dlR=null, delayOut=null, verbBus=null, verbOut=null, chorusIn=null;
+
+/* per-voice FX send amounts (d=delay, v=reverb, chorus=routes through chorus bus) */
+const SENDS = {
+  lead: {d:0.35, v:0.18},
+  acid: {d:0.22, v:0.08},
+  pluck:{d:0.45, v:0.22},
+  sub:  {d:0,    v:0},      // keep low end clean
+  pad:  {d:0.10, v:0.50, chorus:true},
+  keys: {d:0.25, v:0.30, chorus:true},
+};
+function route(out, synth){
+  const s = SENDS[synth] || {d:0, v:0};
+  out.connect(s.chorus ? chorusIn : master);
+  if(s.d && delayBus){ const sg=g(s.d); out.connect(sg); sg.connect(delayBus); }
+  if(s.v && verbBus){ const sg=g(s.v); out.connect(sg); sg.connect(verbBus); }
+}
+function makeIR(){ // dark plate-ish impulse response, ~2s T60
+  const len = Math.floor(actx.sampleRate*2.4);
+  const buf = actx.createBuffer(2, len, actx.sampleRate);
+  for(let ch=0; ch<2; ch++){
+    const d = buf.getChannelData(ch); let lp=0;
+    for(let i=0;i<len;i++){
+      const t = i/actx.sampleRate;
+      const w = (Math.random()*2-1)*Math.exp(-3.4*t);
+      lp += 0.22*(w-lp); // one-pole darkening, tail gets duller
+      d[i] = lp*0.6;
+    }
+  }
+  return buf;
+}
+function setDelayTimes(immediate){
+  if(!dlL) return;
+  const t = Math.min(2.4, 0.75*60/clip.bpm); // dotted eighth
+  if(immediate){ dlL.delayTime.value=t; dlR.delayTime.value=t; }
+  else {
+    dlL.delayTime.setTargetAtTime(t, actx.currentTime, 0.05);
+    dlR.delayTime.setTargetAtTime(t, actx.currentTime, 0.05);
+  }
+}
+function setFxLevels(){
+  if(delayOut) delayOut.gain.value = (+el('delayVol').value/100)*0.9;
+  if(verbOut) verbOut.gain.value = (+el('verbVol').value/100)*1.0;
+}
 
 function ensureAudio(){
   if(!actx){
@@ -135,6 +179,37 @@ function ensureAudio(){
     pulseGain = actx.createGain();
     master.connect(brightLP); brightLP.connect(comp); comp.connect(cutGain); cutGain.connect(actx.destination);
     pulseGain.connect(master);
+    // --- FX: ping-pong delay (dotted eighth, dark feedback) ---
+    delayBus = g(1);
+    dlL = actx.createDelay(2.5); dlR = actx.createDelay(2.5);
+    const fbLP = actx.createBiquadFilter(); fbLP.type='lowpass'; fbLP.frequency.value=3600;
+    const fb = g(0.42);
+    const dpL = actx.createStereoPanner(); dpL.pan.value=-0.65;
+    const dpR = actx.createStereoPanner(); dpR.pan.value=0.65;
+    delayOut = g(0.55);
+    delayBus.connect(dlL); dlL.connect(dlR);
+    dlR.connect(fbLP); fbLP.connect(fb); fb.connect(dlL);
+    dlL.connect(dpL); dpL.connect(delayOut);
+    dlR.connect(dpR); dpR.connect(delayOut);
+    delayOut.connect(master);
+    // --- FX: reverb (generated dark IR through convolver) ---
+    verbBus = g(1);
+    const preDly = actx.createDelay(0.1); preDly.delayTime.value=0.02;
+    const conv = actx.createConvolver(); conv.buffer = makeIR();
+    verbOut = g(0.55);
+    verbBus.connect(preDly); preDly.connect(conv); conv.connect(verbOut); verbOut.connect(master);
+    // --- FX: stereo chorus bus for pad/keys ---
+    chorusIn = g(1);
+    const cDry = g(0.75); chorusIn.connect(cDry); cDry.connect(master);
+    [[0.014,0.35,-0.55],[0.019,0.47,0.55]].forEach(([base,rate,pan])=>{
+      const cd = actx.createDelay(0.06); cd.delayTime.value=base;
+      const lfo = mkOsc('sine',rate), lg = g(0.004);
+      lfo.connect(lg); lg.connect(cd.delayTime); lfo.start();
+      const cg = g(0.55), pn = actx.createStereoPanner(); pn.pan.value=pan;
+      chorusIn.connect(cd); cd.connect(cg); cg.connect(pn); pn.connect(master);
+    });
+    setDelayTimes(true);
+    setFxLevels();
     setBrightness(+el('bright').value);
     setPulseVol(+el('pulseVol').value);
     noiseBuf = actx.createBuffer(1, actx.sampleRate*0.5, actx.sampleRate);
@@ -169,26 +244,34 @@ function env(node, t, dur, {a=0.005, d=0, s=1, r=0.15, peak=1}){
 }
 
 const VOICES = {
-  lead(p, t, dur, vel){ // dirty detuned-saw buzz
-    const f=freqOf(p), out=g(0.26*vel);
-    const ws=drive(3.2), lp=actx.createBiquadFilter();
-    lp.type='lowpass'; lp.frequency.value=2500; lp.Q.value=1.0;
-    ws.connect(lp); lp.connect(out); out.connect(master);
-    const stop = env(out, t, dur, {a:0.006, d:0.1, s:0.82, r:0.22, peak:0.26*vel});
-    for(const det of [-13,0,13]){
-      const o=mkOsc('sawtooth', f, det), og=g(0.33);
-      o.connect(og); og.connect(ws); o.start(t); o.stop(stop);
-    }
+  lead(p, t, dur, vel){ // 7-voice stereo supersaw through drive
+    const f=freqOf(p), out=g(0.22*vel);
+    const ws=drive(2.6), lp=actx.createBiquadFilter();
+    lp.type='lowpass'; lp.frequency.value=2600; lp.Q.value=0.9;
+    ws.connect(lp); lp.connect(out); route(out,'lead');
+    const stop = env(out, t, dur, {a:0.007, d:0.12, s:0.8, r:0.28, peak:0.22*vel});
+    const DET=[-38,-24,-11,0,11,24,38], PAN=[-0.8,-0.45,-0.2,0,0.2,0.45,0.8];
+    DET.forEach((det,i)=>{
+      const o=mkOsc('sawtooth', f, det), og=g(i===3?0.34:0.17);
+      const pn=actx.createStereoPanner(); pn.pan.value=PAN[i];
+      o.connect(og); og.connect(pn); pn.connect(ws);
+      o.start(t+(i%3)*0.004); o.stop(stop); // staggered starts decohere phases
+    });
   },
-  acid(p, t, dur, vel){ // driven acid bass
+  acid(p, t, dur, vel){ // 24dB cascaded filters with drive inside the ladder
     const f=freqOf(p), out=g(0.3*vel);
-    const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.Q.value=7;
-    lp.frequency.setValueAtTime(220+f, t);
-    lp.frequency.exponentialRampToValueAtTime(900+vel*900+f, t+0.02);
-    lp.frequency.setTargetAtTime(180+f, t+0.02, 0.12);
-    const ws=drive(4);
+    const ws1=drive(2.2), ws2=drive(3);
+    const lp1=actx.createBiquadFilter(); lp1.type='lowpass'; lp1.Q.value=1.2;
+    const lp2=actx.createBiquadFilter(); lp2.type='lowpass'; lp2.Q.value=6;
+    for(const lp of [lp1,lp2]){
+      lp.frequency.setValueAtTime(220+f, t);
+      lp.frequency.exponentialRampToValueAtTime(900+vel*900+f, t+0.02);
+      lp.frequency.setTargetAtTime(170+f, t+0.02, 0.12);
+    }
     const o1=mkOsc('sawtooth', f), o2=mkOsc('square', f, -6), m=g(0.5);
-    o1.connect(m); o2.connect(m); m.connect(lp); lp.connect(ws); ws.connect(out); out.connect(master);
+    o1.connect(m); o2.connect(m);
+    m.connect(ws1); ws1.connect(lp1); lp1.connect(ws2); ws2.connect(lp2); lp2.connect(out);
+    route(out,'acid');
     const stop = env(out, t, dur, {a:0.003, d:0.0, s:1, r:0.09, peak:0.3*vel});
     o1.start(t); o2.start(t); o1.stop(stop); o2.stop(stop);
   },
@@ -198,7 +281,7 @@ const VOICES = {
     lp.frequency.setValueAtTime(3800, t);
     lp.frequency.setTargetAtTime(420, t, 0.06);
     const o=mkOsc('sawtooth', f), o2=mkOsc('sawtooth', f, 9), m=g(0.5);
-    o.connect(m); o2.connect(m); m.connect(lp); lp.connect(out); out.connect(master);
+    o.connect(m); o2.connect(m); m.connect(lp); lp.connect(out); route(out,'pluck');
     const stop = env(out, t, dur, {a:0.002, d:0.14, s:0.3, r:0.13, peak:0.3*vel});
     o.start(t); o2.start(t); o.stop(stop); o2.stop(stop);
   },
@@ -207,7 +290,7 @@ const VOICES = {
     const o=mkOsc('sine', f*2.4), ws=drive(1.8);
     o.frequency.setValueAtTime(f*2.4, t);
     o.frequency.exponentialRampToValueAtTime(f, t+0.055);
-    o.connect(ws); ws.connect(out); out.connect(master);
+    o.connect(ws); ws.connect(out); route(out,'sub');
     const stop = env(out, t, Math.max(dur,0.45), {a:0.004, d:0.0, s:1, r:0.28, peak:0.55*vel});
     o.start(t); o.stop(stop);
   },
@@ -215,7 +298,7 @@ const VOICES = {
     const f=freqOf(p), out=g(0.2*vel);
     const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1800; lp.Q.value=0.5;
     const wob=g(0.86); // amp wobble carrier
-    lp.connect(wob); wob.connect(out); out.connect(master);
+    lp.connect(wob); wob.connect(out); route(out,'pad');
     const a = Math.min(0.55, Math.max(0.08, dur*0.4));
     const stop = env(out, t, dur, {a, d:0, s:1, r:3.2, peak:0.2*vel});
     const lfoA=mkOsc('sine',0.31), lfoAG=g(0.1);
@@ -231,7 +314,7 @@ const VOICES = {
   keys(p, t, dur, vel){ // lo-fi keys
     const f=freqOf(p), out=g(0.27*vel);
     const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=3200; lp.Q.value=0.6;
-    lp.connect(out); out.connect(master);
+    lp.connect(out); route(out,'keys');
     const stop = env(out, t, dur, {a:0.004, d:0.35, s:0.45, r:0.5, peak:0.27*vel});
     const vib=mkOsc('sine',5.2), vg=g(3.5); vib.connect(vg);
     [['triangle',f,-5,0.5],['triangle',f,5,0.5],['sine',f*2,0,0.14]].forEach(([ty,fr,det,amp])=>{
@@ -305,6 +388,7 @@ function schedule(){
 }
 function play(){
   ensureAudio();
+  setDelayTimes();
   cutGain.gain.cancelScheduledValues(actx.currentTime);
   cutGain.gain.setValueAtTime(1, actx.currentTime);
   curStep=ui.viewBar*16; nextTime=actx.currentTime+0.06; stepQueue.length=0;
@@ -700,7 +784,7 @@ function hideOverlay(){
   const o = el('audioOverlay');
   if(o) o.remove();
 }
-function bpmSet(v){ clip.bpm = Math.max(50, Math.min(200, v)); el('bpmVal').textContent=clip.bpm; save(); }
+function bpmSet(v){ clip.bpm = Math.max(50, Math.min(200, v)); el('bpmVal').textContent=clip.bpm; setDelayTimes(); save(); }
 function holdable(btn, fn){ // tap = once, hold = repeat
   let iv=null, to=null;
   btn.addEventListener('pointerdown', ()=>{ fn(); to=setTimeout(()=>{ iv=setInterval(fn, 70); }, 420); });
@@ -741,6 +825,8 @@ function init(){
   el('swing').addEventListener('input', e=>{ clip.swing=+e.target.value; el('swingVal').textContent=clip.swing+'%'; save(); });
   el('bright').addEventListener('input', e=>{ ensureAudio(); setBrightness(+e.target.value); });
   el('pulseVol').addEventListener('input', e=>{ if(pulseGain) setPulseVol(+e.target.value); });
+  el('delayVol').addEventListener('input', setFxLevels);
+  el('verbVol').addEventListener('input', setFxLevels);
   document.querySelectorAll('[data-pulse]').forEach(b=>{
     b.addEventListener('click', ()=>{
       ui.pulse = b.dataset.pulse;
