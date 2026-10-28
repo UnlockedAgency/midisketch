@@ -271,12 +271,12 @@ function env(node, t, dur, {a=0.005, d=0, s=1, r=0.15, peak=1}){
 }
 
 const VOICES = {
-  lead(p, t, dur, vel){ // 7-voice stereo supersaw through drive
+  lead(p, t, dur, vel, tight){ // 7-voice stereo supersaw through drive
     const f=freqOf(p), out=g(0.22*vel);
     const ws=drive(2.6), lp=actx.createBiquadFilter();
     lp.type='lowpass'; lp.frequency.value=2600; lp.Q.value=0.9;
     ws.connect(lp); lp.connect(out); route(out,'lead');
-    const stop = env(out, t, dur, {a:0.007, d:0.12, s:0.8, r:0.28, peak:0.22*vel});
+    const stop = env(out, t, dur, {a:0.007, d:0.12, s:0.8, r:tight?0.045:0.28, peak:0.22*vel});
     const DET=[-38,-24,-11,0,11,24,38], PAN=[-0.8,-0.45,-0.2,0,0.2,0.45,0.8];
     DET.forEach((det,i)=>{
       const o=mkOsc('sawtooth', f, det), og=g(i===3?0.34:0.17);
@@ -285,7 +285,7 @@ const VOICES = {
       o.start(t+(i%3)*0.004); o.stop(stop); // staggered starts decohere phases
     });
   },
-  acid(p, t, dur, vel){ // 24dB cascaded filters with drive inside the ladder
+  acid(p, t, dur, vel, tight){ // 24dB cascaded filters with drive inside the ladder
     const f=freqOf(p), out=g(0.3*vel);
     const ws1=drive(2.2), ws2=drive(3);
     const lp1=actx.createBiquadFilter(); lp1.type='lowpass'; lp1.Q.value=1.2;
@@ -299,35 +299,35 @@ const VOICES = {
     o1.connect(m); o2.connect(m);
     m.connect(ws1); ws1.connect(lp1); lp1.connect(ws2); ws2.connect(lp2); lp2.connect(out);
     route(out,'acid');
-    const stop = env(out, t, dur, {a:0.003, d:0.0, s:1, r:0.09, peak:0.3*vel});
+    const stop = env(out, t, dur, {a:0.003, d:0.0, s:1, r:tight?0.04:0.09, peak:0.3*vel});
     o1.start(t); o2.start(t); o1.stop(stop); o2.stop(stop);
   },
-  pluck(p, t, dur, vel){ // house pluck/stab
+  pluck(p, t, dur, vel, tight){ // house pluck/stab
     const f=freqOf(p), out=g(0.3*vel);
     const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.Q.value=2;
     lp.frequency.setValueAtTime(3800, t);
     lp.frequency.setTargetAtTime(420, t, 0.06);
     const o=mkOsc('sawtooth', f), o2=mkOsc('sawtooth', f, 9), m=g(0.5);
     o.connect(m); o2.connect(m); m.connect(lp); lp.connect(out); route(out,'pluck');
-    const stop = env(out, t, dur, {a:0.002, d:0.14, s:0.3, r:0.13, peak:0.3*vel});
+    const stop = env(out, t, dur, {a:0.002, d:0.14, s:0.3, r:tight?0.04:0.13, peak:0.3*vel});
     o.start(t); o2.start(t); o.stop(stop); o2.stop(stop);
   },
-  sub(p, t, dur, vel){ // 808 sub with pitch drop
+  sub(p, t, dur, vel, tight){ // 808 sub with pitch drop
     const f=freqOf(p), out=g(0.55*vel);
     const o=mkOsc('sine', f*2.4), ws=drive(1.8);
     o.frequency.setValueAtTime(f*2.4, t);
     o.frequency.exponentialRampToValueAtTime(f, t+0.055);
     o.connect(ws); ws.connect(out); route(out,'sub');
-    const stop = env(out, t, Math.max(dur,0.45), {a:0.004, d:0.0, s:1, r:0.28, peak:0.55*vel});
+    const stop = env(out, t, tight?dur:Math.max(dur,0.45), {a:0.004, d:0.0, s:1, r:tight?0.06:0.28, peak:0.55*vel});
     o.start(t); o.stop(stop);
   },
-  pad(p, t, dur, vel){ // BoC tape-wobble pad
+  pad(p, t, dur, vel, tight){ // BoC tape-wobble pad
     const f=freqOf(p), out=g(0.2*vel);
     const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1800; lp.Q.value=0.5;
     const wob=g(0.86); // amp wobble carrier
     lp.connect(wob); wob.connect(out); route(out,'pad');
-    const a = Math.min(0.55, Math.max(0.08, dur*0.4));
-    const stop = env(out, t, dur, {a, d:0, s:1, r:3.2, peak:0.2*vel});
+    const a = tight ? 0.006 : Math.min(0.55, Math.max(0.08, dur*0.4));
+    const stop = env(out, t, dur, {a, d:0, s:1, r:tight?0.07:3.2, peak:0.2*vel});
     const lfoA=mkOsc('sine',0.31), lfoAG=g(0.1);
     lfoA.connect(lfoAG); lfoAG.connect(wob.gain); lfoA.start(t); lfoA.stop(stop);
     [['triangle',-8,0.4,0.11],['triangle',8,0.4,0.17],['sine',0,0.5,0.13]].forEach(([ty,det,amp,drift])=>{
@@ -338,11 +338,11 @@ const VOICES = {
       o.start(t); o.stop(stop); lfo.start(t); lfo.stop(stop);
     });
   },
-  keys(p, t, dur, vel){ // lo-fi keys
+  keys(p, t, dur, vel, tight){ // lo-fi keys
     const f=freqOf(p), out=g(0.27*vel);
     const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=3200; lp.Q.value=0.6;
     lp.connect(out); route(out,'keys');
-    const stop = env(out, t, dur, {a:0.004, d:0.35, s:0.45, r:0.5, peak:0.27*vel});
+    const stop = env(out, t, dur, {a:0.004, d:0.35, s:0.45, r:tight?0.05:0.5, peak:0.27*vel});
     const vib=mkOsc('sine',5.2), vg=g(3.5); vib.connect(vg);
     [['triangle',f,-5,0.5],['triangle',f,5,0.5],['sine',f*2,0,0.14]].forEach(([ty,fr,det,amp])=>{
       const o=mkOsc(ty,fr,det), og=g(amp);
@@ -352,8 +352,8 @@ const VOICES = {
     vib.start(t); vib.stop(stop);
   },
 };
-function voicePlay(synth, pitch, t, dur, accent){
-  VOICES[synth] && VOICES[synth](pitch, t, dur, accent?1:0.68);
+function voicePlay(synth, pitch, t, dur, accent, tight){
+  VOICES[synth] && VOICES[synth](pitch, t, dur, accent?1:0.68, tight);
 }
 
 /* ---- drum kit voices (909 / 808 flavors, dark-tuned) ---- */
@@ -473,11 +473,11 @@ function schedule(){
     const fire = (c, n)=>{
       const drum = c.type==='drums';
       const r = n.roll||0;
-      const one = (tt, d)=> drum ? drumPlay(c.kit, n.pitch, tt, d, n.accent)
-                                 : voicePlay(c.synth, n.pitch, tt, d, n.accent);
-      if(r){ // roll subdivides 16ths regardless of note grain
+      const one = (tt, d, tight)=> drum ? drumPlay(c.kit, n.pitch, tt, d, n.accent)
+                                        : voicePlay(c.synth, n.pitch, tt, d, n.accent, tight);
+      if(r){ // roll subdivides 16ths; 50% gate + clamped release = actual gaps
         const hd = sixteenthDur()/r, hits = Math.max(1, Math.round(n.len*r/2));
-        for(let i=0;i<hits;i++) one(t+i*hd, hd*0.85);
+        for(let i=0;i<hits;i++) one(t+i*hd, hd*0.5, true);
       }
       else one(t, Math.max(n.len*stepDur()*0.92, 0.05));
     };
@@ -756,8 +756,8 @@ function initGridInput(){
         if(actx){
           const r = nv||1, hd = sixteenthDur()/r;
           for(let i=0;i<r;i++){
-            if(isDrum()) drumPlay(clip.kit, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
-            else voicePlay(clip.synth, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
+            if(isDrum()) drumPlay(clip.kit, d.note.pitch, actx.currentTime+i*hd, hd*0.5, d.note.accent);
+            else voicePlay(clip.synth, d.note.pitch, actx.currentTime+i*hd, hd*0.5, d.note.accent, true);
           }
         }
       }

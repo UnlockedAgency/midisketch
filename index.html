@@ -101,11 +101,12 @@ input[type=range]{touch-action:none}
 .gridRow.off{background-color:#0b0e13; opacity:.55}
 #notes{position:absolute; inset:0; pointer-events:none}
 .note{position:absolute; height:calc(var(--rowh) - 6px); margin-top:3px; border-radius:6px;
-  background:linear-gradient(180deg,#45e2cf,#23a596); border:1px solid #9df3e8; opacity:.95;
+  background-color:#2fb5a3; background-image:linear-gradient(180deg,#45e2cf,#23a596);
+  border:1px solid #9df3e8; opacity:.95;
   display:flex; align-items:center; justify-content:center;
-  font-size:10px; font-weight:800; color:#06281f; overflow:hidden}
-.note.accent{background:linear-gradient(180deg,#f2c178,#cf8f3a); border-color:#ffe3b3}
-.note.stray{background:linear-gradient(180deg,#e07a7a,#a84848); border-color:#ffb9b9}
+  font-size:10px; font-weight:800; color:#eafffb; text-shadow:0 1px 2px rgba(0,0,0,.65); overflow:hidden}
+.note.accent{background-color:#d89a4d; background-image:linear-gradient(180deg,#f2c178,#cf8f3a); border-color:#ffe3b3}
+.note.stray{background-color:#b85555; background-image:linear-gradient(180deg,#e07a7a,#a84848); border-color:#ffb9b9}
 .note.contL{border-top-left-radius:0; border-bottom-left-radius:0; border-left-style:dashed}
 .note.contR{border-top-right-radius:0; border-bottom-right-radius:0; border-right-style:dashed}
 #playhead{position:absolute; top:0; bottom:0; width:2px; background:var(--accent); opacity:.85; display:none; pointer-events:none}
@@ -175,7 +176,7 @@ input[type=range]{touch-action:none}
 </div>
 
 <div id="soundPanel">
-  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v8</div>
+  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v9</div>
   <div class="sp"><label>Swing</label><input type="range" id="swing" min="0" max="60" value="0"><span id="swingVal" style="width:38px">0%</span></div>
   <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
   <div class="sp"><label>Delay</label><input type="range" id="delayVol" min="0" max="100" value="60"></div>
