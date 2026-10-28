@@ -38,6 +38,10 @@ input[type=range]{accent-color:var(--accent); width:100%}
 
 header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
 #controls{flex:none; max-height:48dvh; overflow-y:auto; display:flex; flex-direction:column; -webkit-overflow-scrolling:touch}
+#controls > *{flex:none}
+#transport{position:sticky; top:0; background:var(--bg); z-index:5}
+#soundPanel.open{max-height:32dvh; overflow-y:auto; -webkit-overflow-scrolling:touch}
+input[type=range]{touch-action:none}
 #barNav{display:flex; align-items:center; gap:4px; flex:none}
 #barNav button{min-width:44px; font-size:16px}
 #barPos{min-width:44px; text-align:center; font-size:13px; color:var(--dim)}
@@ -169,6 +173,7 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
 </div>
 
 <div id="soundPanel">
+  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v7</div>
   <div class="sp"><label>Swing</label><input type="range" id="swing" min="0" max="60" value="0"><span id="swingVal" style="width:38px">0%</span></div>
   <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
   <div class="sp"><label>Delay</label><input type="range" id="delayVol" min="0" max="100" value="60"></div>
@@ -189,7 +194,6 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
     <div class="pm"><button id="octDn">−</button><span class="val" id="octVal">C2–B4</span><button id="octUp">+</button></div>
     <span style="color:var(--dim);font-size:11px">shift range</span>
   </div>
-  <div style="color:var(--dim);font-size:11px">midisketch v6</div>
 </div>
 
 <div class="row" id="barRow"></div>
