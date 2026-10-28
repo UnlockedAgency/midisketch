@@ -37,9 +37,9 @@ const ui = {
 /* internal resolution: 32nd-note units. 32 units per bar; coarse view snaps to 2-unit (16th) grain. */
 const UPB = 32;
 const grain = () => ui.fine ? 1 : 2;
-const viewSpanU = () => ui.fine ? 16 : 32;
-const viewStartU = () => ui.viewBar*UPB + (ui.fine ? ui.viewHalf*16 : 0);
-const pxPerUnit = () => (gridMetrics.stepW*16)/viewSpanU();
+const viewSpanU = () => UPB;                 // full bar always visible
+const viewStartU = () => ui.viewBar*UPB;
+const pxPerUnit = () => (gridMetrics.stepW*16)/UPB;
 
 /* ---- undo ---- */
 let undoStack = [];
@@ -159,11 +159,24 @@ const SENDS = {
   pad:  {d:0.10, v:0.50, chorus:true},
   keys: {d:0.25, v:0.30, chorus:true},
 };
+let activeGate = null; // set synchronously by voicePlay around voice construction
+function scheduleGate(param, gt){ // square amplitude chop: sustained sound, sliced volume
+  param.setValueAtTime(0.0001, Math.max(gt.t-0.003, 0));
+  for(let i=0;i<gt.hits;i++){
+    const h = gt.t + i*gt.hd, close = h + gt.hd*gt.duty;
+    param.linearRampToValueAtTime(1, h+0.004);
+    param.setValueAtTime(1, Math.max(close-0.008, h+0.005));
+    param.linearRampToValueAtTime(0.0001, close);
+    param.setValueAtTime(0.0001, close);
+  }
+}
 function route(out, synth){
   const s = SENDS[synth] || {d:0, v:0};
-  out.connect(s.chorus ? chorusIn : master);
-  if(s.d && delayBus){ const sg=g(s.d); out.connect(sg); sg.connect(delayBus); }
-  if(s.v && verbBus){ const sg=g(s.v); out.connect(sg); sg.connect(verbBus); }
+  let src = out;
+  if(activeGate){ const gg=g(1); out.connect(gg); scheduleGate(gg.gain, activeGate); src=gg; }
+  src.connect(s.chorus ? chorusIn : master);
+  if(s.d && delayBus){ const sg=g(s.d); src.connect(sg); sg.connect(delayBus); }
+  if(s.v && verbBus){ const sg=g(s.v); src.connect(sg); sg.connect(verbBus); }
 }
 function makeIR(){ // dark plate-ish impulse response, ~2s T60
   const len = Math.floor(actx.sampleRate*2.4);
@@ -352,8 +365,11 @@ const VOICES = {
     vib.start(t); vib.stop(stop);
   },
 };
-function voicePlay(synth, pitch, t, dur, accent, tight){
-  VOICES[synth] && VOICES[synth](pitch, t, dur, accent?1:0.68, tight);
+function voicePlay(synth, pitch, t, dur, accent, opt){
+  // opt: true = tight envelope (short release); {t,hd,hits,duty} = amplitude gate
+  activeGate = (opt && opt.hits) ? opt : null;
+  try{ VOICES[synth] && VOICES[synth](pitch, t, dur, accent?1:0.68, opt===true); }
+  finally{ activeGate = null; }
 }
 
 /* ---- drum kit voices (909 / 808 flavors, dark-tuned) ---- */
@@ -473,13 +489,13 @@ function schedule(){
     const fire = (c, n)=>{
       const drum = c.type==='drums';
       const r = n.roll||0;
-      const one = (tt, d, tight)=> drum ? drumPlay(c.kit, n.pitch, tt, d, n.accent)
-                                        : voicePlay(c.synth, n.pitch, tt, d, n.accent, tight);
-      if(r){ // roll subdivides 16ths; 50% gate + clamped release = actual gaps
+      if(r){ // drums: retrigger (hat rolls). synths: ONE sustained voice, volume-gated
         const hd = sixteenthDur()/r, hits = Math.max(1, Math.round(n.len*r/2));
-        for(let i=0;i<hits;i++) one(t+i*hd, hd*0.5, true);
+        if(drum) for(let i=0;i<hits;i++) drumPlay(c.kit, n.pitch, t+i*hd, hd*0.5, n.accent);
+        else voicePlay(c.synth, n.pitch, t, Math.max(n.len*stepDur()*0.98, 0.1), n.accent, {t, hd, hits, duty:0.55});
       }
-      else one(t, Math.max(n.len*stepDur()*0.92, 0.05));
+      else if(drum) drumPlay(c.kit, n.pitch, t, Math.max(n.len*stepDur()*0.92, 0.05), n.accent);
+      else voicePlay(c.synth, n.pitch, t, Math.max(n.len*stepDur()*0.92, 0.05), n.accent);
     };
     for(const n of clip.notes) if(n.start===curStep) fire(clip, n);
     if(!isDrum()){
@@ -528,12 +544,11 @@ function tickUI(){
   if(stepQueue.length){
     const s = stepQueue[0].step;
     const bar = Math.floor(s/UPB);
-    const half = Math.floor((s%UPB)/16);
     if(bar!==ui.playBar){
       ui.playBar=bar;
-      if(ui.follow && ui.viewBar!==bar){ ui.viewBar=bar; ui.viewHalf=half; renderAll(); }
+      if(ui.follow && ui.viewBar!==bar){ ui.viewBar=bar; renderAll(); }
       else renderBarChips();
-    } else if(ui.follow && ui.fine && half!==ui.viewHalf){ ui.viewHalf=half; renderAll(); }
+    }
     const ph = el('playhead');
     const vs = viewStartU();
     if(s>=vs && s<vs+viewSpanU()){
@@ -589,7 +604,7 @@ function syncUIFields(){
 }
 
 function renderBarChips(){
-  el('barPos').textContent = (ui.viewBar+1)+(ui.fine?(ui.viewHalf?'b':'a'):'')+'/'+clip.bars;
+  el('barPos').textContent = (ui.viewBar+1)+'/'+clip.bars;
   el('fineBtn').textContent = 'Grid: '+(ui.fine?'1/32':'1/16');
   el('fineBtn').classList.toggle('on', ui.fine);
   const host = el('barRow'); host.innerHTML='';
@@ -599,7 +614,7 @@ function renderBarChips(){
     btn.innerHTML = `<small>bar ${b+1}</small><span class="ch">${isDrum()?'●':chordName(c)}</span>`;
     btn.addEventListener('click', ()=>{
       if(ui.viewBar===b) openChordModal(b);
-      else { ui.viewBar=b; ui.viewHalf=0; renderAll(); }
+      else { ui.viewBar=b; renderAll(); }
     });
     host.appendChild(btn);
   });
@@ -685,7 +700,9 @@ function cellAt(ev){
   const col = Math.max(0, Math.min(15, Math.floor(x/gridMetrics.stepW)));
   const ri = Math.floor(y/gridMetrics.rowH);
   if(ri<0 || ri>=rows.length) return null;
-  return {step: viewStartU()+col*grain(), pitch: rows[ri]};
+  // fine mode: each 16th cell splits in two 1/32 halves
+  const half = (ui.fine && (x - col*gridMetrics.stepW) > gridMetrics.stepW/2) ? 1 : 0;
+  return {step: viewStartU()+col*2+half, pitch: rows[ri]};
 }
 function noteAt(pitch, step){
   return clip.notes.find(n=>n.pitch===pitch && step>=n.start && step<n.start+n.len);
@@ -754,11 +771,10 @@ function initGridInput(){
         d.note.roll = nv;
         renderNotes();
         if(actx){
-          const r = nv||1, hd = sixteenthDur()/r;
-          for(let i=0;i<r;i++){
-            if(isDrum()) drumPlay(clip.kit, d.note.pitch, actx.currentTime+i*hd, hd*0.5, d.note.accent);
-            else voicePlay(clip.synth, d.note.pitch, actx.currentTime+i*hd, hd*0.5, d.note.accent, true);
-          }
+          const r = nv||1, hd = sixteenthDur()/r, now = actx.currentTime+0.02;
+          if(isDrum()) for(let i=0;i<r;i++) drumPlay(clip.kit, d.note.pitch, now+i*hd, hd*0.5, d.note.accent);
+          else if(nv) voicePlay(clip.synth, d.note.pitch, now, sixteenthDur()*2, d.note.accent, {t:now, hd, hits:r*2, duty:0.55});
+          else voicePlay(clip.synth, d.note.pitch, now, sixteenthDur(), d.note.accent);
         }
       }
     }
@@ -1034,17 +1050,14 @@ function init(){
   el('barsSel').addEventListener('change', e=>{ pushUndo(); clip.bars=+e.target.value; syncProgression(); save(); renderAll(); });
   el('undoBtn').addEventListener('click', undo);
   const barStep = d => {
-    if(ui.fine){
-      const max = clip.bars*2;
-      const pos = ((ui.viewBar*2 + ui.viewHalf + d) + max) % max;
-      ui.viewBar = Math.floor(pos/2); ui.viewHalf = pos%2;
-    } else ui.viewBar = (ui.viewBar + d + clip.bars) % clip.bars;
+    ui.viewBar = (ui.viewBar + d + clip.bars) % clip.bars;
     renderAll();
   };
   el('barPrev').addEventListener('click', ()=>barStep(-1));
   el('barNext').addEventListener('click', ()=>barStep(1));
   el('fineBtn').addEventListener('click', ()=>{
-    ui.fine = !ui.fine; ui.viewHalf = 0;
+    ui.fine = !ui.fine;
+    el('grid').classList.toggle('fine', ui.fine);
     renderAll();
   });
   el('loopBtn').addEventListener('click', ()=>{
