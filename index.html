@@ -37,6 +37,10 @@ select{background:var(--panel2); border:1px solid var(--line); border-radius:9px
 input[type=range]{accent-color:var(--accent); width:100%}
 
 header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
+#controls{flex:none; max-height:48dvh; overflow-y:auto; display:flex; flex-direction:column; -webkit-overflow-scrolling:touch}
+#barNav{display:flex; align-items:center; gap:4px; flex:none}
+#barNav button{min-width:44px; font-size:16px}
+#barPos{min-width:44px; text-align:center; font-size:13px; color:var(--dim)}
 #clipName{flex:1; min-width:40px; background:transparent; border:none; border-bottom:1px dashed var(--line);
   padding:6px 2px; font-size:15px; font-weight:600; border-radius:0}
 #audioBadge{font-size:13px; padding:6px 8px; min-height:34px}
@@ -136,6 +140,7 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
   <button id="exportBtn">⬇ .mid</button>
 </header>
 
+<div id="controls">
 <div class="row" id="transport">
   <button id="playBtn">▶</button>
   <div class="stack">BPM
@@ -184,17 +189,21 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
     <div class="pm"><button id="octDn">−</button><span class="val" id="octVal">C2–B4</span><button id="octUp">+</button></div>
     <span style="color:var(--dim);font-size:11px">shift range</span>
   </div>
-  <div style="color:var(--dim);font-size:11px">midisketch v4</div>
+  <div style="color:var(--dim);font-size:11px">midisketch v5</div>
 </div>
 
 <div class="row" id="barRow"></div>
-<div id="hint">tap a bar chip again = chord &amp; bar tools · drag note sideways = stretch · hold = accent · Roll mode: tap note = cycle ×2 ×3 ×4</div>
+<div id="hint">◀ ▶ or bar chips move between bars · tap current bar's chip = chord &amp; bar tools · drag note sideways = stretch · hold = accent · Roll: tap note = ×2 ×3 ×4 subdivisions (×2 = 1/32s)</div>
 <div class="row" id="toolRow">
+  <div id="barNav">
+    <button id="barPrev">◀</button><span id="barPos">1/4</span><button id="barNext">▶</button>
+  </div>
   <button id="spiceBtn">✦ Spice: off</button>
   <button id="rollBtn">∿ Roll: off</button>
   <button id="loopBtn">Loop: clip</button>
   <button id="followBtn">Follow: off</button>
   <button id="snapBtn">⚠ snap strays</button>
+</div>
 </div>
 
 <div id="gridWrap">
@@ -225,12 +234,12 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
   <h3>Clips</h3>
   <div id="clipList"></div>
   <div class="sheetBtns">
-    <button id="newSynthBtn">＋ Synth</button>
-    <button id="newDrumBtn">＋ Drums</button>
-    <button id="bundleBtn">Bundle .mid</button>
+    <button id="newSynthBtn">＋ New Synth clip</button>
+    <button id="newDrumBtn">＋ New Drum clip</button>
   </div>
   <div class="sheetBtns">
-    <button id="backupBtn">Backup all (JSON)</button>
+    <button id="bundleBtn">Bundle .mid</button>
+    <button id="backupBtn">Backup (JSON)</button>
     <button id="clipsDone" class="on">Done</button>
   </div>
 </div></div>

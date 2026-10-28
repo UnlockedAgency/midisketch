@@ -572,6 +572,7 @@ function syncUIFields(){
 }
 
 function renderBarChips(){
+  el('barPos').textContent = (ui.viewBar+1)+'/'+clip.bars;
   const host = el('barRow'); host.innerHTML='';
   clip.progression.forEach((c,b)=>{
     const btn = document.createElement('button');
@@ -1000,6 +1001,9 @@ function init(){
   holdable(el('bpmUp'), ()=>bpmSet(clip.bpm+1));
   el('barsSel').addEventListener('change', e=>{ pushUndo(); clip.bars=+e.target.value; syncProgression(); save(); renderAll(); });
   el('undoBtn').addEventListener('click', undo);
+  const barStep = d => { ui.viewBar = (ui.viewBar + d + clip.bars) % clip.bars; renderAll(); };
+  el('barPrev').addEventListener('click', ()=>barStep(-1));
+  el('barNext').addEventListener('click', ()=>barStep(1));
   el('rollBtn').addEventListener('click', ()=>{
     ui.rollMode=!ui.rollMode;
     el('rollBtn').textContent='∿ Roll: '+(ui.rollMode?'on':'off');
