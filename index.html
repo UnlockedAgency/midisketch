@@ -19,6 +19,7 @@
   --sat:env(safe-area-inset-top); --sab:env(safe-area-inset-bottom);
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none}
+[hidden]{display:none !important}
 html,body{margin:0; height:100%; overscroll-behavior:none}
 body{
   background:var(--bg); color:var(--text);
@@ -143,7 +144,13 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
   <div class="stack">Bars
     <select id="barsSel"><option>1</option><option>2</option><option selected>4</option><option>8</option></select>
   </div>
-  <div class="stack">Synth
+  <div class="stack" id="kitStack" hidden>Kit
+    <select id="kitSel">
+      <option value="909">909 House</option>
+      <option value="808">808 HipHop</option>
+    </select>
+  </div>
+  <div class="stack" id="synthStack">Synth
     <select id="synthSel">
       <option value="lead">Buzz Lead</option>
       <option value="acid">Acid Bass</option>
@@ -161,7 +168,10 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
   <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
   <div class="sp"><label>Delay</label><input type="range" id="delayVol" min="0" max="100" value="60"></div>
   <div class="sp"><label>Reverb</label><input type="range" id="verbVol" min="0" max="100" value="55"></div>
-  <div class="sp"><label>Pulse</label>
+  <div class="sp" id="grooveRow"><label>Groove</label>
+    <select id="grooveSel" style="flex:1"><option value="">none — use pulse below</option></select>
+  </div>
+  <div class="sp" id="pulseRow1"><label>Pulse</label>
     <div class="chips">
       <button data-pulse="off" class="on">Off</button>
       <button data-pulse="house">House</button>
@@ -169,12 +179,12 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
       <button data-pulse="techno">Techno</button>
     </div>
   </div>
-  <div class="sp"><label>Pulse vol</label><input type="range" id="pulseVol" min="0" max="100" value="55"></div>
+  <div class="sp" id="pulseRow2"><label>Pulse vol</label><input type="range" id="pulseVol" min="0" max="100" value="55"></div>
   <div class="sp"><label>Octaves</label>
     <div class="pm"><button id="octDn">−</button><span class="val" id="octVal">C2–B4</span><button id="octUp">+</button></div>
     <span style="color:var(--dim);font-size:11px">shift range</span>
   </div>
-  <div style="color:var(--dim);font-size:11px">midisketch v3</div>
+  <div style="color:var(--dim);font-size:11px">midisketch v4</div>
 </div>
 
 <div class="row" id="barRow"></div>
@@ -198,8 +208,10 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
 
 <div class="modal" id="chordModal"><div class="sheet">
   <h3 id="chordTitle">Bar 1 chord</h3>
-  <div class="sec">Root</div><div class="chips" id="rootChips"></div>
-  <div class="sec">Type</div><div class="chips" id="typeChips"></div>
+  <div id="chordEditWrap">
+    <div class="sec">Root</div><div class="chips" id="rootChips"></div>
+    <div class="sec">Type</div><div class="chips" id="typeChips"></div>
+  </div>
   <div class="sec">Bar tools</div>
   <div class="chips"><button id="copyBarBtn">⧉ Copy this bar's notes</button></div>
   <div class="chips" id="pasteChips" style="margin-top:6px"></div>
@@ -213,7 +225,11 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
   <h3>Clips</h3>
   <div id="clipList"></div>
   <div class="sheetBtns">
-    <button id="newClipBtn">＋ New clip</button>
+    <button id="newSynthBtn">＋ Synth</button>
+    <button id="newDrumBtn">＋ Drums</button>
+    <button id="bundleBtn">Bundle .mid</button>
+  </div>
+  <div class="sheetBtns">
     <button id="backupBtn">Backup all (JSON)</button>
     <button id="clipsDone" class="on">Done</button>
   </div>
