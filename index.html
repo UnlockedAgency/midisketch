@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0e1116">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<title>MIDI Sketch</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#161c25; --panel2:#1d2530; --line:#2a3442;
+  --text:#cfd8e3; --dim:#73808f; --accent:#3dd6c3; --accent-dk:#1d8a7e;
+  --amber:#e0a458; --red:#e06c6c; --rowh:34px; --stepw:22px;
+  --sat:env(safe-area-inset-top); --sab:env(safe-area-inset-bottom);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none}
+html,body{margin:0; height:100%; overscroll-behavior:none}
+body{
+  background:var(--bg); color:var(--text);
+  font:14px/1.3 -apple-system,system-ui,"Segoe UI",sans-serif;
+  display:flex; flex-direction:column; height:100dvh;
+  padding-top:var(--sat); padding-bottom:var(--sab);
+  user-select:none; -webkit-user-select:none; touch-action:manipulation;
+}
+button,select,input{font:inherit; color:inherit}
+button{background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 10px; min-height:40px}
+button:active{background:#2b3645}
+button.on{background:var(--accent-dk); border-color:var(--accent); color:#eafffb}
+select{background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 6px; min-height:40px}
+input[type=range]{accent-color:var(--accent); width:100%}
+
+header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
+#clipName{flex:1; min-width:40px; background:transparent; border:none; border-bottom:1px dashed var(--line);
+  padding:6px 2px; font-size:15px; font-weight:600; border-radius:0}
+#audioBadge{font-size:13px; padding:6px 8px; min-height:34px}
+
+.row{display:flex; gap:6px; align-items:center; padding:4px 10px; flex-wrap:nowrap}
+#transport{overflow-x:auto}
+.stack{display:flex; flex-direction:column; align-items:center; font-size:10px; color:var(--dim)}
+.pm{display:flex; align-items:center; gap:2px}
+.pm button{min-width:38px; font-size:17px; padding:4px}
+.pm .val{min-width:40px; text-align:center; font-size:15px; font-weight:600; color:var(--text)}
+#playBtn{min-width:62px; font-size:19px; background:var(--accent-dk); border-color:var(--accent); color:#eafffb}
+#playBtn.playing{background:#7e2c2c; border-color:var(--red)}
+
+#soundPanel{background:var(--panel); border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+  padding:8px 12px; display:none; flex-direction:column; gap:10px; font-size:13px}
+#soundPanel.open{display:flex}
+#soundPanel .sp{display:flex; align-items:center; gap:8px}
+#soundPanel .sp label{width:76px; color:var(--dim); flex:none}
+.chips{display:flex; gap:6px; flex-wrap:wrap}
+.chips button{padding:6px 10px; min-height:34px; font-size:13px}
+
+#barRow{overflow-x:auto; padding:6px 10px; gap:6px}
+.barChip{min-width:64px; flex:none; display:flex; flex-direction:column; align-items:center; gap:1px; padding:5px 8px}
+.barChip small{color:var(--dim); font-size:10px}
+.barChip.cur{border-color:var(--accent); background:#12332f}
+.barChip.playing small::after{content:' ▸'; color:var(--accent)}
+.barChip .ch{font-weight:700; font-size:14px}
+#hint{color:var(--dim); font-size:11px; padding:0 12px 4px}
+
+#toolRow{padding:2px 10px 6px}
+#toolRow button{min-height:34px; padding:5px 10px; font-size:12px}
+#snapBtn{display:none; border-color:var(--red); color:#f3b0b0}
+#snapBtn.show{display:block}
+
+#gridWrap{flex:1; display:flex; overflow-y:auto; overflow-x:hidden; position:relative; border-top:1px solid var(--line)}
+#labels{width:74px; flex:none}
+.lab{height:var(--rowh); display:flex; align-items:center; justify-content:flex-end; gap:5px;
+  padding-right:7px; font-size:11px; color:var(--dim); border-bottom:1px solid #151b23}
+.lab b{color:var(--text); font-size:12px; font-weight:600}
+.lab .deg{display:inline-block; min-width:18px; text-align:center; border-radius:4px; background:var(--panel2); padding:1px 2px; font-size:10px}
+.lab.root b{color:var(--amber)}
+.lab.root .deg{background:#3d3322; color:var(--amber)}
+.lab.spiceRow .deg{color:var(--accent); background:#16333a}
+.lab.off{opacity:.35}
+#grid{flex:1; position:relative; touch-action:none}
+.gridRow{height:var(--rowh); border-bottom:1px solid #151b23; position:relative;
+  background-image:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--stepw)*4 - 1px), #2a3442 calc(var(--stepw)*4 - 1px), #2a3442 calc(var(--stepw)*4)),
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--stepw) - 1px), #1b222c calc(var(--stepw) - 1px), #1b222c var(--stepw));
+}
+.gridRow.tone{background-color:#141b24}
+.gridRow.root{background-color:#17202b}
+.gridRow.spiceRow{background-color:#10171f}
+.gridRow.off{background-color:#0b0e13; opacity:.55}
+#notes{position:absolute; inset:0; pointer-events:none}
+.note{position:absolute; height:calc(var(--rowh) - 6px); margin-top:3px; border-radius:6px;
+  background:linear-gradient(180deg,#45e2cf,#23a596); border:1px solid #9df3e8; opacity:.95}
+.note.accent{background:linear-gradient(180deg,#f2c178,#cf8f3a); border-color:#ffe3b3}
+.note.stray{background:linear-gradient(180deg,#e07a7a,#a84848); border-color:#ffb9b9}
+.note.contL{border-top-left-radius:0; border-bottom-left-radius:0; border-left-style:dashed}
+.note.contR{border-top-right-radius:0; border-bottom-right-radius:0; border-right-style:dashed}
+#playhead{position:absolute; top:0; bottom:0; width:2px; background:var(--accent); opacity:.85; display:none; pointer-events:none}
+
+.modal{position:fixed; inset:0; background:rgba(5,8,12,.72); display:none; z-index:30;
+  align-items:flex-end; justify-content:center}
+.modal.open{display:flex}
+.sheet{background:var(--panel); border:1px solid var(--line); border-bottom:none; border-radius:18px 18px 0 0;
+  width:100%; max-width:560px; max-height:82dvh; overflow-y:auto; padding:14px 14px calc(14px + var(--sab))}
+.sheet h3{margin:2px 0 10px; font-size:15px}
+.sheet .sec{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin:12px 0 6px}
+.clipItem{display:flex; align-items:center; gap:8px; padding:9px 4px; border-bottom:1px solid var(--line)}
+.clipItem .nm{flex:1; min-width:0}
+.clipItem .nm b{display:block; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.clipItem .nm small{color:var(--dim); font-size:11px}
+.clipItem button{min-height:34px; padding:5px 9px; font-size:12px; flex:none}
+.sheetBtns{display:flex; gap:8px; margin-top:12px}
+.sheetBtns button{flex:1}
+
+#audioOverlay{position:fixed; inset:0; z-index:50; background:rgba(8,11,15,.93);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:30px}
+#audioOverlay .big{font-size:21px; font-weight:700}
+#audioOverlay .sub{color:var(--dim); max-width:300px; font-size:13px; line-height:1.5}
+</style>
+</head>
+<body>
+
+<div id="audioOverlay">
+  <div class="big">🎹 MIDI Sketch</div>
+  <div class="sub">Tap anywhere to enable sound.<br><br>📱 iPhone: if you hear nothing, flip the <b>ringer silent switch</b> — it mutes browser audio. Headphones recommended.</div>
+</div>
+
+<header>
+  <button id="clipsBtn">☰</button>
+  <input id="clipName" value="Sketch 1" autocomplete="off" spellcheck="false">
+  <button id="audioBadge" title="audio status">🔇</button>
+  <button id="exportBtn">⬇ .mid</button>
+</header>
+
+<div class="row" id="transport">
+  <button id="playBtn">▶</button>
+  <div class="stack">BPM
+    <div class="pm"><button id="bpmDn">−</button><span class="val" id="bpmVal">122</span><button id="bpmUp">+</button></div>
+  </div>
+  <div class="stack">Bars
+    <select id="barsSel"><option>1</option><option>2</option><option selected>4</option><option>8</option></select>
+  </div>
+  <div class="stack">Synth
+    <select id="synthSel">
+      <option value="lead">Buzz Lead</option>
+      <option value="acid">Acid Bass</option>
+      <option value="pluck">House Pluck</option>
+      <option value="sub">808 Sub</option>
+      <option value="pad">BoC Pad</option>
+      <option value="keys">Lo-fi Keys</option>
+    </select>
+  </div>
+  <button id="soundBtn">Sound ▾</button>
+</div>
+
+<div id="soundPanel">
+  <div class="sp"><label>Swing</label><input type="range" id="swing" min="0" max="60" value="0"><span id="swingVal" style="width:38px">0%</span></div>
+  <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
+  <div class="sp"><label>Pulse</label>
+    <div class="chips">
+      <button data-pulse="off" class="on">Off</button>
+      <button data-pulse="house">House</button>
+      <button data-pulse="hiphop">Hip&nbsp;Hop</button>
+      <button data-pulse="techno">Techno</button>
+    </div>
+  </div>
+  <div class="sp"><label>Pulse vol</label><input type="range" id="pulseVol" min="0" max="100" value="55"></div>
+  <div class="sp"><label>Octaves</label>
+    <div class="pm"><button id="octDn">−</button><span class="val" id="octVal">C2–B4</span><button id="octUp">+</button></div>
+    <span style="color:var(--dim);font-size:11px">shift range</span>
+  </div>
+</div>
+
+<div class="row" id="barRow"></div>
+<div id="hint">tap a bar chip again to change its chord · drag a note sideways to stretch · hold for accent</div>
+<div class="row" id="toolRow">
+  <button id="spiceBtn">✦ Spice: off</button>
+  <button id="followBtn">Follow: off</button>
+  <button id="snapBtn">⚠ snap strays to chord</button>
+</div>
+
+<div id="gridWrap">
+  <div id="labels"></div>
+  <div id="grid">
+    <div id="rows"></div>
+    <div id="notes"></div>
+    <div id="playhead"></div>
+  </div>
+</div>
+
+<div class="modal" id="chordModal"><div class="sheet">
+  <h3 id="chordTitle">Bar 1 chord</h3>
+  <div class="sec">Root</div><div class="chips" id="rootChips"></div>
+  <div class="sec">Type</div><div class="chips" id="typeChips"></div>
+  <div class="sheetBtns">
+    <button id="applyAllBtn">Apply to all bars</button>
+    <button id="chordDone" class="on">Done</button>
+  </div>
+</div></div>
+
+<div class="modal" id="clipsModal"><div class="sheet">
+  <h3>Clips</h3>
+  <div id="clipList"></div>
+  <div class="sheetBtns">
+    <button id="newClipBtn">＋ New clip</button>
+    <button id="backupBtn">Backup all (JSON)</button>
+    <button id="clipsDone" class="on">Done</button>
+  </div>
+</div></div>
+
+<script src="app.js"></script>
+</body>
+</html>
