@@ -31,9 +31,15 @@ let store = {clips:[], cur:null};
 let clip = null;
 
 const ui = {
-  viewBar:0, playBar:-1, follow:false, pulse:'off',
-  drag:null, playing:false, rollMode:false, loopBar:false,
+  viewBar:0, viewHalf:0, fine:false, playBar:-1, follow:false, pulse:'off',
+  drag:null, playing:false, loopBar:false,
 };
+/* internal resolution: 32nd-note units. 32 units per bar; coarse view snaps to 2-unit (16th) grain. */
+const UPB = 32;
+const grain = () => ui.fine ? 1 : 2;
+const viewSpanU = () => ui.fine ? 16 : 32;
+const viewStartU = () => ui.viewBar*UPB + (ui.fine ? ui.viewHalf*16 : 0);
+const pxPerUnit = () => (gridMetrics.stepW*16)/viewSpanU();
 
 /* ---- undo ---- */
 let undoStack = [];
@@ -74,12 +80,16 @@ function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(store)); }catc
 function load(){
   try{ const s = JSON.parse(localStorage.getItem(LS_KEY)); if(s && s.clips && s.clips.length) store = s; }catch(e){}
   store.clips.forEach(c=>{ if(!c.type) c.type='synth'; if(!c.kit) c.kit='909'; if(c.backingId===undefined) c.backingId=null; });
+  if(!store.u32){ // one-time migration: 16th-note units -> 32nd-note units
+    store.clips.forEach(c=>c.notes.forEach(n=>{ n.start*=2; n.len*=2; }));
+    store.u32 = true;
+  }
   if(!store.clips.length){ const c = newClip(); store.clips=[c]; store.cur=c.id; }
   clip = store.clips.find(c=>c.id===store.cur) || store.clips[0];
   store.cur = clip.id;
   save();
 }
-function totalSteps(){ return clip.bars*16; }
+function totalSteps(){ return clip.bars*UPB; } // in 32nd units
 
 function syncProgression(){
   const old = clip.progression;
@@ -116,7 +126,7 @@ function computeRows(){ // descending MIDI pitches shown as rows
   clip.notes.forEach(n=>set.add(n.pitch)); // strays stay visible
   return [...set].sort((a,b)=>b-a);
 }
-function barOfStep(step){ return Math.min(Math.floor(step/16), clip.bars-1); }
+function barOfStep(step){ return Math.min(Math.floor(step/UPB), clip.bars-1); }
 function isStray(n){
   if(isDrum()) return false;
   const s = chordSets(barOfStep(n.start));
@@ -452,33 +462,37 @@ function pulseStep(s16, t){
 /* ---- transport / lookahead scheduler ---- */
 let schedTimer=null, curStep=0, nextTime=0;
 const stepQueue=[];
-const stepDur = () => 60/clip.bpm/4;
+const stepDur = () => 60/clip.bpm/8;        // one 32nd unit
+const sixteenthDur = () => 60/clip.bpm/4;
 
 function schedule(){
   while(nextTime < actx.currentTime + 0.12){
-    const swingOff = (curStep%2===1) ? clip.swing/100*stepDur()*0.66 : 0;
+    const swingOff = (Math.floor(curStep/2)%2===1) ? clip.swing/100*sixteenthDur()*0.66 : 0;
     const t = nextTime + swingOff;
     const fire = (c, n)=>{
       const drum = c.type==='drums';
       const r = n.roll||0;
       const one = (tt, d)=> drum ? drumPlay(c.kit, n.pitch, tt, d, n.accent)
                                  : voicePlay(c.synth, n.pitch, tt, d, n.accent);
-      if(r){ const hd = stepDur()/r; for(let i=0;i<n.len*r;i++) one(t+i*hd, hd*0.85); }
-      else one(t, Math.max(n.len*stepDur()*0.92, 0.06));
+      if(r){ // roll subdivides 16ths regardless of note grain
+        const hd = sixteenthDur()/r, hits = Math.max(1, Math.round(n.len*r/2));
+        for(let i=0;i<hits;i++) one(t+i*hd, hd*0.85);
+      }
+      else one(t, Math.max(n.len*stepDur()*0.92, 0.05));
     };
     for(const n of clip.notes) if(n.start===curStep) fire(clip, n);
     if(!isDrum()){
       const bg = clip.backingId && store.clips.find(x=>x.id===clip.backingId && x.type==='drums');
       if(bg){
-        const bs = curStep % (bg.bars*16);
+        const bs = curStep % (bg.bars*UPB);
         for(const n of bg.notes) if(n.start===bs) fire(bg, n);
-      } else pulseStep(curStep%16, t);
+      } else if(curStep%2===0) pulseStep((curStep/2)%16, t);
     }
     stepQueue.push({step:curStep, time:nextTime});
     let next = curStep+1;
     if(ui.loopBar){
-      const s0 = ui.viewBar*16;
-      if(next < s0 || next >= s0+16) next = s0;
+      const s0 = ui.viewBar*UPB;
+      if(next < s0 || next >= s0+UPB) next = s0;
     } else if(next >= totalSteps()) next = 0;
     curStep = next;
     nextTime += stepDur();
@@ -489,7 +503,7 @@ function play(){
   setDelayTimes();
   cutGain.gain.cancelScheduledValues(actx.currentTime);
   cutGain.gain.setValueAtTime(1, actx.currentTime);
-  curStep=ui.viewBar*16; nextTime=actx.currentTime+0.06; stepQueue.length=0;
+  curStep=ui.viewBar*UPB; nextTime=actx.currentTime+0.06; stepQueue.length=0;
   schedTimer=setInterval(schedule, 25); schedule();
   ui.playing=true; el('playBtn').textContent='■'; el('playBtn').classList.add('playing');
   requestAnimationFrame(tickUI);
@@ -512,16 +526,18 @@ function tickUI(){
   while(stepQueue.length>1 && stepQueue[1].time<=actx.currentTime) stepQueue.shift();
   if(stepQueue.length){
     const s = stepQueue[0].step;
-    const bar = Math.floor(s/16);
+    const bar = Math.floor(s/UPB);
+    const half = Math.floor((s%UPB)/16);
     if(bar!==ui.playBar){
       ui.playBar=bar;
-      if(ui.follow && ui.viewBar!==bar){ ui.viewBar=bar; renderAll(); }
+      if(ui.follow && ui.viewBar!==bar){ ui.viewBar=bar; ui.viewHalf=half; renderAll(); }
       else renderBarChips();
-    }
+    } else if(ui.follow && ui.fine && half!==ui.viewHalf){ ui.viewHalf=half; renderAll(); }
     const ph = el('playhead');
-    if(bar===ui.viewBar){
+    const vs = viewStartU();
+    if(s>=vs && s<vs+viewSpanU()){
       ph.style.display='block';
-      ph.style.left = ((s%16)*gridMetrics.stepW)+'px';
+      ph.style.left = ((s-vs)*pxPerUnit())+'px';
     } else ph.style.display='none';
   }
   requestAnimationFrame(tickUI);
@@ -572,7 +588,9 @@ function syncUIFields(){
 }
 
 function renderBarChips(){
-  el('barPos').textContent = (ui.viewBar+1)+'/'+clip.bars;
+  el('barPos').textContent = (ui.viewBar+1)+(ui.fine?(ui.viewHalf?'b':'a'):'')+'/'+clip.bars;
+  el('fineBtn').textContent = 'Grid: '+(ui.fine?'1/32':'1/16');
+  el('fineBtn').classList.toggle('on', ui.fine);
   const host = el('barRow'); host.innerHTML='';
   clip.progression.forEach((c,b)=>{
     const btn = document.createElement('button');
@@ -580,7 +598,7 @@ function renderBarChips(){
     btn.innerHTML = `<small>bar ${b+1}</small><span class="ch">${isDrum()?'●':chordName(c)}</span>`;
     btn.addEventListener('click', ()=>{
       if(ui.viewBar===b) openChordModal(b);
-      else { ui.viewBar=b; renderAll(); }
+      else { ui.viewBar=b; ui.viewHalf=0; renderAll(); }
     });
     host.appendChild(btn);
   });
@@ -631,21 +649,21 @@ function renderGrid(){
 
 function renderNotes(){
   const host = el('notes'); host.innerHTML='';
-  const barStart = ui.viewBar*16, barEnd = barStart+16;
+  const vs0 = viewStartU(), vEnd = vs0+viewSpanU(), ppu = pxPerUnit();
   for(const n of clip.notes){
     const nEnd = n.start+n.len;
-    if(nEnd<=barStart || n.start>=barEnd) continue;
-    const vs = Math.max(n.start, barStart), ve = Math.min(nEnd, barEnd);
+    if(nEnd<=vs0 || n.start>=vEnd) continue;
+    const vs = Math.max(n.start, vs0), ve = Math.min(nEnd, vEnd);
     const ri = rows.indexOf(n.pitch);
     if(ri<0) continue;
     const d = document.createElement('div');
     d.className = 'note'+(n.accent?' accent':'')+(isStray(n)?' stray':'')
-      +(n.start<barStart?' contL':'')+(nEnd>barEnd?' contR':'');
-    d.style.left = ((vs-barStart)*gridMetrics.stepW+1)+'px';
-    d.style.width = ((ve-vs)*gridMetrics.stepW-3)+'px';
+      +(n.start<vs0?' contL':'')+(nEnd>vEnd?' contR':'');
+    d.style.left = ((vs-vs0)*ppu+1)+'px';
+    d.style.width = ((ve-vs)*ppu-3)+'px';
     d.style.top = (ri*gridMetrics.rowH)+'px';
     if(n.roll){
-      const seg = gridMetrics.stepW/n.roll;
+      const seg = ppu*2/n.roll; // roll subdivides 16ths (2 units)
       d.style.backgroundImage = `repeating-linear-gradient(90deg, transparent 0 ${seg-2}px, rgba(8,12,16,.6) ${seg-2}px ${seg}px)`;
     }
     host.appendChild(d);
@@ -665,7 +683,7 @@ function cellAt(ev){
   const col = Math.max(0, Math.min(15, Math.floor(x/gridMetrics.stepW)));
   const ri = Math.floor(y/gridMetrics.rowH);
   if(ri<0 || ri>=rows.length) return null;
-  return {step: ui.viewBar*16+col, pitch: rows[ri]};
+  return {step: viewStartU()+col*grain(), pitch: rows[ri]};
 }
 function noteAt(pitch, step){
   return clip.notes.find(n=>n.pitch===pitch && step>=n.start && step<n.start+n.len);
@@ -702,7 +720,7 @@ function initGridInput(){
         if(!(s.tones.has(pc) || (clip.spice && s.spice.has(pc)))) return;
       }
       pushUndo();
-      const note = {pitch:c.pitch, start:c.step, len:1, accent:false};
+      const note = {pitch:c.pitch, start:c.step, len:grain(), accent:false};
       clip.notes.push(note);
       previewNote(c.pitch);
       ui.drag = {mode:'stretch', note, x0:ev.clientX, y0:ev.clientY};
@@ -712,33 +730,42 @@ function initGridInput(){
   grid.addEventListener('pointermove', ev=>{
     if(!ui.drag) return;
     const d = ui.drag;
-    if(d.mode==='maybe' && Math.abs(ev.clientX-d.x0)>9){
-      clearTimeout(d.lp); d.mode='stretch';
+    if(d.mode==='maybe'){
+      const dx = ev.clientX-d.x0, dy = ev.clientY-d.y0;
+      if(Math.abs(dx)>9 && Math.abs(dx)>=Math.abs(dy)){ clearTimeout(d.lp); d.mode='stretch'; }
+      else if(Math.abs(dy)>14 && Math.abs(dy)>Math.abs(dx) && !d.isNew){
+        clearTimeout(d.lp); d.mode='roll';
+        d.rollIdx0 = [0,2,3,4].indexOf(d.note.roll||0); d.y0r = ev.clientY;
+      }
     }
     if(d.mode==='stretch'){
       const c = cellAt(ev); if(!c) return;
-      const newLen = Math.max(1, Math.min(totalSteps()-d.note.start, c.step-d.note.start+1));
+      const newLen = Math.max(grain(), Math.min(totalSteps()-d.note.start, c.step-d.note.start+grain()));
       if(newLen!==d.note.len){ d.note.len=newLen; renderNotes(); }
+    }
+    if(d.mode==='roll'){
+      const seq = [0,2,3,4];
+      const idx = Math.max(0, Math.min(3, d.rollIdx0 + Math.round((d.y0r-ev.clientY)/26)));
+      const nv = seq[idx];
+      if(nv!==(d.note.roll||0)){
+        d.note.roll = nv;
+        renderNotes();
+        if(actx){
+          const r = nv||1, hd = sixteenthDur()/r;
+          for(let i=0;i<r;i++){
+            if(isDrum()) drumPlay(clip.kit, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
+            else voicePlay(clip.synth, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
+          }
+        }
+      }
     }
   });
   const finish = ev=>{
     if(!ui.drag) return;
     const d = ui.drag; ui.drag=null;
     clearTimeout(d.lp);
-    if(d.mode==='maybe'){
-      if(ui.rollMode){ // cycle roll: off -> x2 -> x3 -> x4 -> off
-        const seq = [0,2,3,4];
-        d.note.roll = seq[(seq.indexOf(d.note.roll||0)+1) % seq.length];
-        if(actx){
-          const r = d.note.roll || 1, hd = stepDur()/r;
-          for(let i=0;i<r;i++){
-            if(isDrum()) drumPlay(clip.kit, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
-            else voicePlay(clip.synth, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
-          }
-        }
-      } else { // plain tap on a note: delete
-        clip.notes = clip.notes.filter(n=>n!==d.note);
-      }
+    if(d.mode==='maybe'){ // plain tap on a note: delete (always — rolls are a vertical drag)
+      clip.notes = clip.notes.filter(n=>n!==d.note);
     } else if(d.mode==='stretch'){
       cleanOverlaps(d.note);
     }
@@ -764,17 +791,17 @@ function openChordModal(b){
 let copiedBar = null; // {from, notes:[{pitch,rel,len,accent,roll}]}
 function copyBar(b){
   copiedBar = {from:b, notes: clip.notes
-    .filter(n=>n.start>=b*16 && n.start<b*16+16)
-    .map(n=>({pitch:n.pitch, rel:n.start-b*16, len:Math.min(n.len, 16-(n.start-b*16)), accent:n.accent, roll:n.roll||0}))};
+    .filter(n=>n.start>=b*UPB && n.start<b*UPB+UPB)
+    .map(n=>({pitch:n.pitch, rel:n.start-b*UPB, len:Math.min(n.len, UPB-(n.start-b*UPB)), accent:n.accent, roll:n.roll||0}))};
   buildBarTools();
   el('copyBarBtn').textContent = `⧉ Copied ${copiedBar.notes.length} notes ✓`;
 }
 function pasteBar(b){
   if(!copiedBar) return;
   pushUndo();
-  clip.notes = clip.notes.filter(n=>!(n.start>=b*16 && n.start<b*16+16));
+  clip.notes = clip.notes.filter(n=>!(n.start>=b*UPB && n.start<b*UPB+UPB));
   for(const sn of copiedBar.notes){
-    const start = b*16+sn.rel;
+    const start = b*UPB+sn.rel;
     clip.notes.push({pitch:sn.pitch, start, len:Math.min(sn.len, totalSteps()-start), accent:sn.accent, roll:sn.roll});
   }
   save(); renderAll();
@@ -879,6 +906,7 @@ function vlq(n){
   return out;
 }
 const SPT = 120; // ticks per 16th at PPQ 480
+const UT = 60;   // ticks per 32nd unit
 function textBytes(s, max){ return Array.from(new TextEncoder().encode(s)).slice(0, max||60); }
 function metaEvt(tick, type, bytes){ return {tick, ord:0, b:[0xFF, type, bytes.length, ...bytes]}; }
 function tempoEvt(bpm){
@@ -892,16 +920,17 @@ function clipEvents(c, ch){ // track-name meta + note events on channel ch
   for(const n of c.notes){
     const vel = n.accent?108:78;
     const r = n.roll||0;
-    if(r){ // expand roll into real subdivided notes (60/40/30 ticks)
+    if(r){ // expand roll into real subdivided notes (60/40/30 ticks per hit)
       const seg = Math.round(SPT/r), gate = Math.max(Math.round(seg*0.8), 10);
-      for(let i=0;i<n.len*r;i++){
-        const t0 = n.start*SPT + i*seg;
+      const hits = Math.max(1, Math.round(n.len*r/2));
+      for(let i=0;i<hits;i++){
+        const t0 = n.start*UT + i*seg;
         evs.push({tick:t0, ord:1, b:[on, n.pitch, vel]});
         evs.push({tick:t0+gate, ord:0, b:[off, n.pitch, 0]});
       }
     } else {
-      evs.push({tick:n.start*SPT, ord:1, b:[on, n.pitch, vel]});
-      evs.push({tick:(n.start+n.len)*SPT, ord:0, b:[off, n.pitch, 0]});
+      evs.push({tick:n.start*UT, ord:1, b:[on, n.pitch, vel]});
+      evs.push({tick:(n.start+n.len)*UT, ord:0, b:[off, n.pitch, 0]});
     }
   }
   return evs;
@@ -1001,13 +1030,19 @@ function init(){
   holdable(el('bpmUp'), ()=>bpmSet(clip.bpm+1));
   el('barsSel').addEventListener('change', e=>{ pushUndo(); clip.bars=+e.target.value; syncProgression(); save(); renderAll(); });
   el('undoBtn').addEventListener('click', undo);
-  const barStep = d => { ui.viewBar = (ui.viewBar + d + clip.bars) % clip.bars; renderAll(); };
+  const barStep = d => {
+    if(ui.fine){
+      const max = clip.bars*2;
+      const pos = ((ui.viewBar*2 + ui.viewHalf + d) + max) % max;
+      ui.viewBar = Math.floor(pos/2); ui.viewHalf = pos%2;
+    } else ui.viewBar = (ui.viewBar + d + clip.bars) % clip.bars;
+    renderAll();
+  };
   el('barPrev').addEventListener('click', ()=>barStep(-1));
   el('barNext').addEventListener('click', ()=>barStep(1));
-  el('rollBtn').addEventListener('click', ()=>{
-    ui.rollMode=!ui.rollMode;
-    el('rollBtn').textContent='∿ Roll: '+(ui.rollMode?'on':'off');
-    el('rollBtn').classList.toggle('on', ui.rollMode);
+  el('fineBtn').addEventListener('click', ()=>{
+    ui.fine = !ui.fine; ui.viewHalf = 0;
+    renderAll();
   });
   el('loopBtn').addEventListener('click', ()=>{
     ui.loopBar=!ui.loopBar;
