@@ -134,6 +134,9 @@ input[type=range]{touch-action:none}
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:30px}
 #audioOverlay .big{font-size:21px; font-weight:700}
 #audioOverlay .sub{color:var(--dim); max-width:300px; font-size:13px; line-height:1.5}
+#updToast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(16px + var(--sab)); z-index:60;
+  background:var(--accent-dk); border:1px solid var(--accent); color:#eafffb;
+  padding:11px 18px; border-radius:12px; font-size:13px; font-weight:600}
 </style>
 </head>
 <body>
@@ -180,7 +183,7 @@ input[type=range]{touch-action:none}
 </div>
 
 <div id="soundPanel">
-  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v10</div>
+  <div style="color:var(--dim);font-size:11px" id="verLabel">midisketch v11</div>
   <div class="sp"><label>Swing</label><input type="range" id="swing" min="0" max="60" value="0"><span id="swingVal" style="width:38px">0%</span></div>
   <div class="sp"><label>Brightness</label><input type="range" id="bright" min="0" max="100" value="75"></div>
   <div class="sp"><label>Delay</label><input type="range" id="delayVol" min="0" max="100" value="60"></div>
@@ -233,7 +236,7 @@ input[type=range]{touch-action:none}
     <div class="sec">Type</div><div class="chips" id="typeChips"></div>
   </div>
   <div class="sec">Bar tools</div>
-  <div class="chips"><button id="copyBarBtn">⧉ Copy this bar's notes</button></div>
+  <div class="chips"><button id="copyBarBtn">⧉ Copy this bar's notes</button><button id="clearBarBtn">✕ Clear bar</button></div>
   <div class="chips" id="pasteChips" style="margin-top:6px"></div>
   <div class="sheetBtns">
     <button id="applyAllBtn">Apply to all bars</button>
@@ -251,10 +254,13 @@ input[type=range]{touch-action:none}
   <div class="sheetBtns">
     <button id="bundleBtn">Bundle .mid</button>
     <button id="backupBtn">Backup (JSON)</button>
+    <button id="restoreBtn">Restore</button>
     <button id="clipsDone" class="on">Done</button>
   </div>
+  <input type="file" id="restoreFile" accept=".json,application/json" hidden>
 </div></div>
 
+<div id="updToast" hidden>✨ Updated — tap to reload</div>
 <script src="app.js"></script>
 </body>
 </html>

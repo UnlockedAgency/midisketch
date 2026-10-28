@@ -1,4 +1,4 @@
-const CACHE = 'midisketch-v10';
+const CACHE = 'midisketch-v11';
 const ASSETS = ['./', './index.html', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

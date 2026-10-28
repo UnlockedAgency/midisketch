@@ -78,7 +78,10 @@ function newClip(type){
 }
 function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(store)); }catch(e){ console.warn('save failed', e); } }
 function load(){
-  try{ const s = JSON.parse(localStorage.getItem(LS_KEY)); if(s && s.clips && s.clips.length) store = s; }catch(e){}
+  try{ const s = JSON.parse(localStorage.getItem(LS_KEY)); if(s && s.clips && s.clips.length) store = s; }
+  catch(e){ // never clobber a corrupt store — stash it for recovery first
+    try{ localStorage.setItem(LS_KEY+'_corrupt', localStorage.getItem(LS_KEY)); }catch(_){}
+  }
   store.clips.forEach(c=>{ if(!c.type) c.type='synth'; if(!c.kit) c.kit='909'; if(c.backingId===undefined) c.backingId=null; });
   if(!store.u32){ // one-time migration: 16th-note units -> 32nd-note units
     store.clips.forEach(c=>c.notes.forEach(n=>{ n.start*=2; n.len*=2; }));
@@ -482,7 +485,19 @@ const stepQueue=[];
 const stepDur = () => 60/clip.bpm/8;        // one 32nd unit
 const sixteenthDur = () => 60/clip.bpm/4;
 
+function advanceStep(){
+  let next = curStep+1;
+  if(ui.loopBar){
+    const s0 = ui.viewBar*UPB;
+    if(next < s0 || next >= s0+UPB) next = s0;
+  } else if(next >= totalSteps()) next = 0;
+  curStep = next;
+  nextTime += stepDur();
+}
 function schedule(){
+  // after a main-thread stall (scroll momentum, backgrounding) skip missed steps
+  // silently instead of firing them all at once
+  while(nextTime < actx.currentTime - 0.03) advanceStep();
   while(nextTime < actx.currentTime + 0.12){
     const swingOff = (Math.floor(curStep/2)%2===1) ? clip.swing/100*sixteenthDur()*0.66 : 0;
     const t = nextTime + swingOff;
@@ -490,7 +505,7 @@ function schedule(){
       const drum = c.type==='drums';
       const r = n.roll||0;
       if(r){ // drums: retrigger (hat rolls). synths: ONE sustained voice, volume-gated
-        const hd = sixteenthDur()/r, hits = Math.max(1, Math.round(n.len*r/2));
+        const hd = sixteenthDur()/r, hits = Math.max(1, Math.floor(n.len*r/2));
         if(drum) for(let i=0;i<hits;i++) drumPlay(c.kit, n.pitch, t+i*hd, hd*0.5, n.accent);
         else voicePlay(c.synth, n.pitch, t, Math.max(n.len*stepDur()*0.98, 0.1), n.accent, {t, hd, hits, duty:0.55});
       }
@@ -506,13 +521,7 @@ function schedule(){
       } else if(curStep%2===0) pulseStep((curStep/2)%16, t);
     }
     stepQueue.push({step:curStep, time:nextTime});
-    let next = curStep+1;
-    if(ui.loopBar){
-      const s0 = ui.viewBar*UPB;
-      if(next < s0 || next >= s0+UPB) next = s0;
-    } else if(next >= totalSteps()) next = 0;
-    curStep = next;
-    nextTime += stepDur();
+    advanceStep();
   }
 }
 function play(){
@@ -546,7 +555,7 @@ function tickUI(){
     const bar = Math.floor(s/UPB);
     if(bar!==ui.playBar){
       ui.playBar=bar;
-      if(ui.follow && ui.viewBar!==bar){ ui.viewBar=bar; renderAll(); }
+      if(ui.follow && !ui.drag && ui.viewBar!==bar){ ui.viewBar=bar; renderAll(); }
       else renderBarChips();
     }
     const ph = el('playhead');
@@ -721,6 +730,7 @@ function initGridInput(){
   const grid = el('grid');
   grid.addEventListener('pointerdown', ev=>{
     ensureAudio(); hideOverlay();
+    if(ui.drag){ clearTimeout(ui.drag.lp); ui.drag=null; } // stale drag from multi-touch / lost pointerup
     const c = cellAt(ev); if(!c) return;
     try{ grid.setPointerCapture(ev.pointerId); }catch(e){}
     const hit = noteAt(c.pitch, c.step);
@@ -783,6 +793,10 @@ function initGridInput(){
     if(!ui.drag) return;
     const d = ui.drag; ui.drag=null;
     clearTimeout(d.lp);
+    if(ev.type==='pointercancel'){ // system stole the touch — never treat as a tap-delete
+      save(); renderNotes(); renderBarChips();
+      return;
+    }
     if(d.mode==='maybe'){ // plain tap on a note: delete (always — rolls are a vertical drag)
       clip.notes = clip.notes.filter(n=>n!==d.note);
     } else if(d.mode==='stretch'){
@@ -827,6 +841,7 @@ function pasteBar(b){
 }
 function buildBarTools(){
   el('copyBarBtn').textContent = '⧉ Copy this bar’s notes';
+  el('clearBarBtn').textContent = '✕ Clear bar';
   const host = el('pasteChips'); host.innerHTML='';
   if(!copiedBar){
     host.innerHTML = '<span style="color:var(--dim);font-size:12px">copy a bar, then paste targets appear here</span>';
@@ -905,7 +920,7 @@ function renderClipList(){
         store.clips = store.clips.filter(x=>x.id!==c.id);
         if(!store.clips.length){ const nc=newClip(); store.clips=[nc]; }
         if(clip.id===c.id) switchClip(store.clips[0].id);
-        save(); renderClipList();
+        save(); renderClipList(); syncUIFields();
       } else { del.dataset.armed='1'; del.textContent='sure?'; del.style.borderColor='var(--red)'; }
     });
     host.appendChild(row);
@@ -941,7 +956,7 @@ function clipEvents(c, ch){ // track-name meta + note events on channel ch
     const r = n.roll||0;
     if(r){ // expand roll into real subdivided notes (60/40/30 ticks per hit)
       const seg = Math.round(SPT/r), gate = Math.max(Math.round(seg*0.8), 10);
-      const hits = Math.max(1, Math.round(n.len*r/2));
+      const hits = Math.max(1, Math.floor(n.len*r/2));
       for(let i=0;i<hits;i++){
         const t0 = n.start*UT + i*seg;
         evs.push({tick:t0, ord:1, b:[on, n.pitch, vel]});
@@ -1066,6 +1081,32 @@ function init(){
     el('loopBtn').classList.toggle('on', ui.loopBar);
   });
   el('copyBarBtn').addEventListener('click', ()=>copyBar(editingBar));
+  el('clearBarBtn').addEventListener('click', ()=>{
+    pushUndo();
+    clip.notes = clip.notes.filter(n=>!(n.start>=editingBar*UPB && n.start<editingBar*UPB+UPB));
+    save(); renderAll();
+  });
+  el('restoreBtn').addEventListener('click', ()=>el('restoreFile').click());
+  el('restoreFile').addEventListener('change', async e=>{
+    const f = e.target.files[0]; if(!f) return;
+    const btn = el('restoreBtn');
+    try{
+      const s = JSON.parse(await f.text());
+      if(!s || !Array.isArray(s.clips)) throw 0;
+      const have = new Set(store.clips.map(c=>c.id));
+      let added = 0;
+      for(const c of s.clips){
+        if(!c || !Array.isArray(c.notes) || !Array.isArray(c.progression)) continue;
+        if(!c.type) c.type='synth'; if(!c.kit) c.kit='909'; if(c.backingId===undefined) c.backingId=null;
+        if(!s.u32) c.notes.forEach(n=>{ n.start*=2; n.len*=2; }); // old 16th-unit backups
+        if(have.has(c.id)) c.id = uid();
+        store.clips.push(c); added++;
+      }
+      save(); renderClipList(); syncUIFields();
+      btn.textContent = added ? `Restored ${added} ✓` : 'Nothing to restore';
+    }catch(err){ btn.textContent = 'Invalid file'; }
+    e.target.value = '';
+  });
   el('synthSel').addEventListener('change', e=>{ clip.synth=e.target.value; save();
     ensureAudio(); voicePlay(clip.synth, 57, actx.currentTime, 0.4, false); });
   el('soundBtn').addEventListener('click', ()=>{
@@ -1133,6 +1174,15 @@ function init(){
   window.addEventListener('resize', renderGrid);
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden && ui.playing) stop(); });
 
-  if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  if('serviceWorker' in navigator){
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+      if(!hadController) return; // first install, not an update
+      const tEl = el('updToast');
+      tEl.hidden = false;
+      tEl.addEventListener('click', ()=>location.reload(), {once:true});
+    });
+  }
 }
 init();
