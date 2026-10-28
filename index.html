@@ -30,6 +30,7 @@ body{
 button,select,input{font:inherit; color:inherit}
 button{background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 10px; min-height:40px}
 button:active{background:#2b3645}
+button:disabled{opacity:.35}
 button.on{background:var(--accent-dk); border-color:var(--accent); color:#eafffb}
 select{background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 6px; min-height:40px}
 input[type=range]{accent-color:var(--accent); width:100%}
@@ -56,8 +57,8 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
 .chips{display:flex; gap:6px; flex-wrap:wrap}
 .chips button{padding:6px 10px; min-height:34px; font-size:13px}
 
-#barRow{overflow-x:auto; padding:6px 10px; gap:6px}
-.barChip{min-width:64px; flex:none; display:flex; flex-direction:column; align-items:center; gap:1px; padding:5px 8px}
+#barRow{flex-wrap:wrap; padding:6px 10px; gap:6px}
+.barChip{min-width:56px; flex:none; display:flex; flex-direction:column; align-items:center; gap:1px; padding:5px 8px}
 .barChip small{color:var(--dim); font-size:10px}
 .barChip.cur{border-color:var(--accent); background:#12332f}
 .barChip.playing small::after{content:' ▸'; color:var(--accent)}
@@ -129,6 +130,7 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
 <header>
   <button id="clipsBtn">☰</button>
   <input id="clipName" value="Sketch 1" autocomplete="off" spellcheck="false">
+  <button id="undoBtn" disabled>↩</button>
   <button id="audioBadge" title="audio status">🔇</button>
   <button id="exportBtn">⬇ .mid</button>
 </header>
@@ -170,14 +172,17 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
     <div class="pm"><button id="octDn">−</button><span class="val" id="octVal">C2–B4</span><button id="octUp">+</button></div>
     <span style="color:var(--dim);font-size:11px">shift range</span>
   </div>
+  <div style="color:var(--dim);font-size:11px">midisketch v2</div>
 </div>
 
 <div class="row" id="barRow"></div>
-<div id="hint">tap a bar chip again to change its chord · drag a note sideways to stretch · hold for accent</div>
+<div id="hint">tap a bar chip again = chord &amp; bar tools · drag note sideways = stretch · hold = accent · Roll mode: tap note = cycle ×2 ×3 ×4</div>
 <div class="row" id="toolRow">
   <button id="spiceBtn">✦ Spice: off</button>
+  <button id="rollBtn">∿ Roll: off</button>
+  <button id="loopBtn">Loop: clip</button>
   <button id="followBtn">Follow: off</button>
-  <button id="snapBtn">⚠ snap strays to chord</button>
+  <button id="snapBtn">⚠ snap strays</button>
 </div>
 
 <div id="gridWrap">
@@ -193,6 +198,9 @@ header{display:flex; gap:6px; align-items:center; padding:8px 10px 4px}
   <h3 id="chordTitle">Bar 1 chord</h3>
   <div class="sec">Root</div><div class="chips" id="rootChips"></div>
   <div class="sec">Type</div><div class="chips" id="typeChips"></div>
+  <div class="sec">Bar tools</div>
+  <div class="chips"><button id="copyBarBtn">⧉ Copy this bar's notes</button></div>
+  <div class="chips" id="pasteChips" style="margin-top:6px"></div>
   <div class="sheetBtns">
     <button id="applyAllBtn">Apply to all bars</button>
     <button id="chordDone" class="on">Done</button>

@@ -25,8 +25,27 @@ let clip = null;
 
 const ui = {
   viewBar:0, playBar:-1, follow:false, pulse:'off',
-  drag:null, playing:false,
+  drag:null, playing:false, rollMode:false, loopBar:false,
 };
+
+/* ---- undo ---- */
+let undoStack = [];
+function pushUndo(){
+  const snap = JSON.stringify({notes:clip.notes, progression:clip.progression, bars:clip.bars});
+  if(undoStack[undoStack.length-1]===snap) return;
+  undoStack.push(snap);
+  if(undoStack.length>60) undoStack.shift();
+  el('undoBtn').disabled = false;
+}
+function undo(){
+  const s = undoStack.pop(); if(!s) return;
+  const o = JSON.parse(s);
+  clip.notes=o.notes; clip.progression=o.progression; clip.bars=o.bars;
+  if(ui.viewBar>=clip.bars) ui.viewBar=clip.bars-1;
+  if(!undoStack.length) el('undoBtn').disabled = true;
+  save(); renderAll();
+}
+function clearUndo(){ undoStack.length=0; el('undoBtn').disabled=true; }
 
 function uid(){ return 'c'+Math.floor(performance.now()*1000).toString(36)+Math.floor(Math.random()*1e6).toString(36); }
 
@@ -89,6 +108,7 @@ function isStray(n){
   return !s.tones.has(pc) && !(clip.spice && s.spice.has(pc));
 }
 function snapStrays(){
+  pushUndo();
   for(const n of clip.notes){
     if(!isStray(n)) continue;
     const tones = chordSets(barOfStep(n.start)).tones;
@@ -265,10 +285,21 @@ function schedule(){
   while(nextTime < actx.currentTime + 0.12){
     const swingOff = (curStep%2===1) ? clip.swing/100*stepDur()*0.66 : 0;
     const t = nextTime + swingOff;
-    for(const n of clip.notes) if(n.start===curStep) voicePlay(clip.synth, n.pitch, t, Math.max(n.len*stepDur()*0.92, 0.06), n.accent);
+    for(const n of clip.notes) if(n.start===curStep){
+      const r = n.roll||0;
+      if(r){
+        const hd = stepDur()/r;
+        for(let i=0;i<n.len*r;i++) voicePlay(clip.synth, n.pitch, t+i*hd, hd*0.85, n.accent);
+      } else voicePlay(clip.synth, n.pitch, t, Math.max(n.len*stepDur()*0.92, 0.06), n.accent);
+    }
     pulseStep(curStep%16, t);
     stepQueue.push({step:curStep, time:nextTime});
-    curStep = (curStep+1) % totalSteps();
+    let next = curStep+1;
+    if(ui.loopBar){
+      const s0 = ui.viewBar*16;
+      if(next < s0 || next >= s0+16) next = s0;
+    } else if(next >= totalSteps()) next = 0;
+    curStep = next;
     nextTime += stepDur();
   }
 }
@@ -276,7 +307,7 @@ function play(){
   ensureAudio();
   cutGain.gain.cancelScheduledValues(actx.currentTime);
   cutGain.gain.setValueAtTime(1, actx.currentTime);
-  curStep=0; nextTime=actx.currentTime+0.06; stepQueue.length=0;
+  curStep=ui.viewBar*16; nextTime=actx.currentTime+0.06; stepQueue.length=0;
   schedTimer=setInterval(schedule, 25); schedule();
   ui.playing=true; el('playBtn').textContent='■'; el('playBtn').classList.add('playing');
   requestAnimationFrame(tickUI);
@@ -399,6 +430,10 @@ function renderNotes(){
     d.style.left = ((vs-barStart)*gridMetrics.stepW+1)+'px';
     d.style.width = ((ve-vs)*gridMetrics.stepW-3)+'px';
     d.style.top = (ri*gridMetrics.rowH)+'px';
+    if(n.roll){
+      const seg = gridMetrics.stepW/n.roll;
+      d.style.backgroundImage = `repeating-linear-gradient(90deg, transparent 0 ${seg-2}px, rgba(8,12,16,.6) ${seg-2}px ${seg}px)`;
+    }
     host.appendChild(d);
   }
 }
@@ -439,6 +474,7 @@ function initGridInput(){
     try{ grid.setPointerCapture(ev.pointerId); }catch(e){}
     const hit = noteAt(c.pitch, c.step);
     if(hit){
+      pushUndo();
       ui.drag = {mode:'maybe', note:hit, x0:ev.clientX, y0:ev.clientY, lp:setTimeout(()=>{
         if(ui.drag && ui.drag.mode==='maybe'){
           hit.accent = !hit.accent; ui.drag.mode='done';
@@ -450,6 +486,7 @@ function initGridInput(){
       const s = chordSets(ui.viewBar); const pc = c.pitch%12;
       const allowed = s.tones.has(pc) || (clip.spice && s.spice.has(pc));
       if(!allowed) return;
+      pushUndo();
       const note = {pitch:c.pitch, start:c.step, len:1, accent:false};
       clip.notes.push(note);
       voicePlay(clip.synth, c.pitch, actx.currentTime, 0.3, false);
@@ -473,8 +510,17 @@ function initGridInput(){
     if(!ui.drag) return;
     const d = ui.drag; ui.drag=null;
     clearTimeout(d.lp);
-    if(d.mode==='maybe'){ // plain tap on a note: delete
-      clip.notes = clip.notes.filter(n=>n!==d.note);
+    if(d.mode==='maybe'){
+      if(ui.rollMode){ // cycle roll: off -> x2 -> x3 -> x4 -> off
+        const seq = [0,2,3,4];
+        d.note.roll = seq[(seq.indexOf(d.note.roll||0)+1) % seq.length];
+        if(actx){
+          const r = d.note.roll || 1, hd = stepDur()/r;
+          for(let i=0;i<r;i++) voicePlay(clip.synth, d.note.pitch, actx.currentTime+i*hd, hd*0.8, d.note.accent);
+        }
+      } else { // plain tap on a note: delete
+        clip.notes = clip.notes.filter(n=>n!==d.note);
+      }
     } else if(d.mode==='stretch'){
       cleanOverlaps(d.note);
     }
@@ -490,7 +536,47 @@ function openChordModal(b){
   editingBar = b;
   el('chordTitle').textContent = 'Bar '+(b+1)+' chord';
   buildChordChips();
+  buildBarTools();
   el('chordModal').classList.add('open');
+}
+
+/* ---- copy/paste bar ---- */
+let copiedBar = null; // {from, notes:[{pitch,rel,len,accent,roll}]}
+function copyBar(b){
+  copiedBar = {from:b, notes: clip.notes
+    .filter(n=>n.start>=b*16 && n.start<b*16+16)
+    .map(n=>({pitch:n.pitch, rel:n.start-b*16, len:Math.min(n.len, 16-(n.start-b*16)), accent:n.accent, roll:n.roll||0}))};
+  buildBarTools();
+  el('copyBarBtn').textContent = `⧉ Copied ${copiedBar.notes.length} notes ✓`;
+}
+function pasteBar(b){
+  if(!copiedBar) return;
+  pushUndo();
+  clip.notes = clip.notes.filter(n=>!(n.start>=b*16 && n.start<b*16+16));
+  for(const sn of copiedBar.notes){
+    const start = b*16+sn.rel;
+    clip.notes.push({pitch:sn.pitch, start, len:Math.min(sn.len, totalSteps()-start), accent:sn.accent, roll:sn.roll});
+  }
+  save(); renderAll();
+}
+function buildBarTools(){
+  el('copyBarBtn').textContent = '⧉ Copy this bar’s notes';
+  const host = el('pasteChips'); host.innerHTML='';
+  if(!copiedBar){
+    host.innerHTML = '<span style="color:var(--dim);font-size:12px">copy a bar, then paste targets appear here</span>';
+    return;
+  }
+  const lbl = document.createElement('span');
+  lbl.textContent = `bar ${copiedBar.from+1} ➜ paste into:`;
+  lbl.style.cssText = 'color:var(--dim);font-size:12px;align-self:center';
+  host.appendChild(lbl);
+  for(let b=0;b<clip.bars;b++){
+    if(b===copiedBar.from) continue;
+    const btn = document.createElement('button');
+    btn.textContent = 'bar '+(b+1);
+    btn.addEventListener('click', ()=>pasteBar(b));
+    host.appendChild(btn);
+  }
 }
 function buildChordChips(){
   const c = clip.progression[editingBar];
@@ -498,14 +584,14 @@ function buildChordChips(){
   NOTE_NAMES.forEach((nm,i)=>{
     const b = document.createElement('button');
     b.textContent = nm; b.classList.toggle('on', i===c.root);
-    b.addEventListener('click', ()=>{ c.root=i; afterChordEdit(); });
+    b.addEventListener('click', ()=>{ pushUndo(); c.root=i; afterChordEdit(); });
     rc.appendChild(b);
   });
   const tc = el('typeChips'); tc.innerHTML='';
   Object.keys(CHORD_TYPES).forEach(k=>{
     const b = document.createElement('button');
     b.textContent = CHORD_TYPES[k].label || 'maj'; b.classList.toggle('on', k===c.type);
-    b.addEventListener('click', ()=>{ c.type=k; afterChordEdit(); });
+    b.addEventListener('click', ()=>{ pushUndo(); c.type=k; afterChordEdit(); });
     tc.appendChild(b);
   });
 }
@@ -544,7 +630,7 @@ function renderClipList(){
 function switchClip(id){
   if(ui.playing) stop();
   store.cur=id; clip = store.clips.find(c=>c.id===id);
-  ui.viewBar=0; save(); renderAll();
+  ui.viewBar=0; copiedBar=null; clearUndo(); save(); renderAll();
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 
@@ -563,8 +649,18 @@ function buildSMF(c){
   evs.push({tick:0, ord:0, b:[0xFF,0x03,...vlq(nameBytes.length).slice(-1), ...nameBytes]});
   for(const n of c.notes){
     const vel = n.accent?108:78;
-    evs.push({tick:n.start*SPT, ord:1, b:[0x90, n.pitch, vel]});
-    evs.push({tick:(n.start+n.len)*SPT, ord:0, b:[0x80, n.pitch, 0]});
+    const r = n.roll||0;
+    if(r){ // expand roll into real subdivided notes (60/40/30 ticks)
+      const seg = Math.round(SPT/r), gate = Math.max(Math.round(seg*0.8), 10);
+      for(let i=0;i<n.len*r;i++){
+        const t0 = n.start*SPT + i*seg;
+        evs.push({tick:t0, ord:1, b:[0x90, n.pitch, vel]});
+        evs.push({tick:t0+gate, ord:0, b:[0x80, n.pitch, 0]});
+      }
+    } else {
+      evs.push({tick:n.start*SPT, ord:1, b:[0x90, n.pitch, vel]});
+      evs.push({tick:(n.start+n.len)*SPT, ord:0, b:[0x80, n.pitch, 0]});
+    }
   }
   evs.sort((a,b)=>a.tick-b.tick || a.ord-b.ord);
   const bytes=[];
@@ -622,7 +718,19 @@ function init(){
   el('playBtn').addEventListener('click', ()=>{ ui.playing ? stop() : play(); });
   holdable(el('bpmDn'), ()=>bpmSet(clip.bpm-1));
   holdable(el('bpmUp'), ()=>bpmSet(clip.bpm+1));
-  el('barsSel').addEventListener('change', e=>{ clip.bars=+e.target.value; syncProgression(); save(); renderAll(); });
+  el('barsSel').addEventListener('change', e=>{ pushUndo(); clip.bars=+e.target.value; syncProgression(); save(); renderAll(); });
+  el('undoBtn').addEventListener('click', undo);
+  el('rollBtn').addEventListener('click', ()=>{
+    ui.rollMode=!ui.rollMode;
+    el('rollBtn').textContent='∿ Roll: '+(ui.rollMode?'on':'off');
+    el('rollBtn').classList.toggle('on', ui.rollMode);
+  });
+  el('loopBtn').addEventListener('click', ()=>{
+    ui.loopBar=!ui.loopBar;
+    el('loopBtn').textContent='Loop: '+(ui.loopBar?'bar':'clip');
+    el('loopBtn').classList.toggle('on', ui.loopBar);
+  });
+  el('copyBarBtn').addEventListener('click', ()=>copyBar(editingBar));
   el('synthSel').addEventListener('change', e=>{ clip.synth=e.target.value; save();
     ensureAudio(); voicePlay(clip.synth, 57, actx.currentTime, 0.4, false); });
   el('soundBtn').addEventListener('click', ()=>{
@@ -650,6 +758,7 @@ function init(){
   el('audioBadge').addEventListener('click', ()=>{ ensureAudio(); voicePlay('keys', 69, actx.currentTime, 0.3, false); });
   el('exportBtn').addEventListener('click', ()=>exportClip(clip));
   el('applyAllBtn').addEventListener('click', ()=>{
+    pushUndo();
     const c = clip.progression[editingBar];
     clip.progression = clip.progression.map(()=>({...c}));
     save(); renderAll(); el('chordModal').classList.remove('open');
